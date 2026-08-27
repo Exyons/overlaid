@@ -1,0 +1,316 @@
+"""Turn an EditDoc into ffmpeg arguments.
+
+This module is pure: it reads a document and returns a plan. It never spawns a
+process, writes a file, or touches the clock. That is what makes the render
+pipeline testable — the filter chain for any document can be asserted as a
+string, with no ffmpeg installed and no fixtures on disk.
+
+It is also the reason the preview can be trusted. `plan_preview` and
+`plan_render` build their filter chain with the same function, so a frame the
+user approved is a frame the export reproduces. The guarantee is structural,
+not a matter of keeping two code paths in step by hand.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from pathlib import Path
+
+from .doc import Box, EditDoc, TextOverlay
+
+# Text is passed to drawtext through a sidecar file rather than inline. Inline
+# text has to survive two layers of ffmpeg parsing, and no escaping scheme
+# handles apostrophes, '%' and backslashes together -- all three appear in
+# ordinary names and department strings. expansion=none additionally stops
+# drawtext treating '%' as a strftime directive.
+TEXT_SUFFIX = ".txt"
+
+
+@dataclass
+class Plan:
+    """A render that has been fully decided but not yet executed."""
+
+    argv: list[str]
+    textfiles: dict[Path, str] = field(default_factory=dict)
+    #: Set when the format needs more than one ffmpeg invocation (GIF).
+    second_pass: list[str] | None = None
+
+    def materialise(self) -> None:
+        """Write the sidecar text files this plan's argv refers to."""
+        for path, content in self.textfiles.items():
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content, encoding="utf-8")
+
+
+# --- geometry --------------------------------------------------------------
+
+
+def fit_inside(src: tuple[int, int], dst: tuple[int, int]) -> tuple[int, int]:
+    """Largest even-dimensioned box with `src`'s aspect that fits inside `dst`."""
+    sw, sh = src
+    dw, dh = dst
+    k = min(dw / sw, dh / sh)
+    return int(sw * k) // 2 * 2, int(sh * k) // 2 * 2
+
+
+def anchor_expr(anchor: str, x: float, y: float) -> tuple[str, str]:
+    """Map a normalized anchor point to drawtext x/y expressions.
+
+    `tw`/`th` are ffmpeg's text width and height, resolved at draw time -- which
+    is why anchoring works for text whose width we do not know here.
+    """
+    v, h = anchor.split("-")
+    ex = {
+        "left": f"w*{x}",
+        "center": f"w*{x}-tw/2",
+        "right": f"w*{x}-tw",
+    }[h]
+    ey = {
+        "top": f"h*{y}",
+        "middle": f"h*{y}-th/2",
+        "bottom": f"h*{y}-th",
+    }[v]
+    return ex, ey
+
+
+# --- filter chain ----------------------------------------------------------
+
+
+def crop_filter(doc: EditDoc) -> str | None:
+    c = doc.crop
+    if c.is_identity:
+        return None
+    # Expressed against iw/ih so the filter stays correct regardless of what
+    # the decoder reports for this particular file.
+    return f"crop=iw*{c.w}:ih*{c.h}:iw*{c.x}:ih*{c.y}"
+
+
+def scale_filters(doc: EditDoc) -> list[str]:
+    """Scale and pad the cropped source onto the output canvas."""
+    out = doc.output
+    cropped = (
+        max(2, int(doc.source.width * doc.crop.w)),
+        max(2, int(doc.source.height * doc.crop.h)),
+    )
+    if out.fit == "stretch":
+        return [f"scale={out.width}:{out.height}:flags=lanczos"]
+    if out.fit == "cover":
+        # Fill the frame and trim the overflow rather than showing bars.
+        return [
+            f"scale={out.width}:{out.height}:force_original_aspect_ratio=increase"
+            ":flags=lanczos",
+            f"crop={out.width}:{out.height}",
+        ]
+    fw, fh = fit_inside(cropped, (out.width, out.height))
+    if (fw, fh) == (out.width, out.height):
+        return [f"scale={out.width}:{out.height}:flags=lanczos"]
+    return [
+        f"scale={fw}:{fh}:flags=lanczos",
+        f"pad={out.width}:{out.height}:(ow-iw)/2:(oh-ih)/2:black",
+    ]
+
+
+def _colour(hex_colour: str, alpha: float | None = None) -> str:
+    """ffmpeg accepts #rrggbb as 0xRRGGBB, with an optional @alpha suffix."""
+    value = "0x" + hex_colour.lstrip("#")
+    return f"{value}@{alpha}" if alpha is not None else value
+
+
+def drawtext_filter(o: TextOverlay, doc: EditDoc, textfile: Path) -> str:
+    """One drawtext call for one overlay.
+
+    Multiline text is drawn as a single block under a single plate: ffmpeg
+    resolves `th` to the height of all lines together, so the anchor maths is
+    identical whether the overlay holds one line or five.
+    """
+    size_px = max(1, round(doc.output.height * o.size))
+    ex, ey = anchor_expr(o.anchor, o.x, o.y)
+
+    parts = [
+        f"textfile='{textfile}'",
+        "expansion=none",
+        f"fontfile='{o.font}'",
+        f"fontsize={size_px}",
+        f"fontcolor={_colour(o.color)}",
+        f"line_spacing={round(size_px * o.line_gap)}",
+        f"x={ex}",
+        f"y={ey}",
+    ]
+    if o.box is not None:
+        parts += [
+            "box=1",
+            f"boxcolor={_colour(o.box.color, o.box.alpha)}",
+            f"boxborderw={max(2, round(size_px * o.box.pad))}",
+        ]
+    if o.is_timed:
+        # Times are relative to the trimmed clip, matching what the user scrubs.
+        lo = o.start if o.start is not None else 0
+        hi = o.end if o.end is not None else doc.duration
+        parts.append(f"enable='between(t,{lo},{hi})'")
+    return "drawtext=" + ":".join(parts)
+
+
+def build_chain(doc: EditDoc, workdir: Path) -> tuple[str, dict[Path, str]]:
+    """The complete -vf chain, plus the sidecar files it references.
+
+    Order is load-bearing: crop reads source pixels, scale and pad build the
+    output canvas, and text lands on that canvas last so it can sit anywhere on
+    the final frame -- letterbox bars included.
+    """
+    chain: list[str] = []
+    if (c := crop_filter(doc)) is not None:
+        chain.append(c)
+    chain += scale_filters(doc)
+
+    textfiles: dict[Path, str] = {}
+    for o in doc.overlays:
+        path = workdir / f"{o.id}{TEXT_SUFFIX}"
+        textfiles[path] = o.text
+        chain.append(drawtext_filter(o, doc, path))
+
+    return ",".join(chain), textfiles
+
+
+# --- output presets --------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Preset:
+    name: str
+    suffix: str
+    video: list[str]
+    audio: list[str]
+    #: GIF cannot be produced in one pass, and is enormous without these caps.
+    max_fps: int | None = None
+    max_width: int | None = None
+    warn: str | None = None
+
+
+PRESETS: dict[str, Preset] = {
+    "mp4": Preset(
+        "mp4", ".mp4",
+        ["-c:v", "libx264", "-preset", "medium", "-pix_fmt", "yuv420p"],
+        ["-c:a", "aac", "-b:a", "192k"],
+    ),
+    "webm": Preset(
+        "webm", ".webm",
+        ["-c:v", "libvpx-vp9", "-b:v", "0", "-row-mt", "1"],
+        ["-c:a", "libopus", "-b:a", "128k"],
+        warn="VP9 encodes roughly 5-10x slower than H.264.",
+    ),
+    "gif": Preset(
+        "gif", ".gif",
+        [], [],
+        max_fps=15, max_width=800,
+        warn="Capped to 15 fps and 800px wide; GIF has no audio.",
+    ),
+    "mov": Preset(
+        "mov", ".mov",
+        ["-c:v", "prores_ks", "-profile:v", "3"],
+        ["-c:a", "pcm_s16le"],
+        warn="ProRes runs about 1.5 GB per minute at 1080p.",
+    ),
+}
+
+#: Each preset's quality knob means something different, so the UI's single
+#: 0-100 slider is mapped per codec rather than passed through as a raw CRF.
+_QUALITY_RANGE = {"mp4": (51, 0), "webm": (63, 0)}
+
+
+def quality_args(preset: Preset, quality: int) -> list[str]:
+    """Map a 0-100 quality slider onto the codec's own scale."""
+    if preset.name not in _QUALITY_RANGE:
+        return []
+    worst, best = _QUALITY_RANGE[preset.name]
+    crf = round(worst + (best - worst) * (max(0, min(100, quality)) / 100))
+    return ["-crf", str(crf)]
+
+
+# --- entry points ----------------------------------------------------------
+
+
+def _trim_args(doc: EditDoc) -> list[str]:
+    """Seek before -i so ffmpeg skips decoding what it is going to discard."""
+    args: list[str] = []
+    if doc.trim.start > 0:
+        args += ["-ss", f"{doc.trim.start:.3f}"]
+    if doc.trim.end is not None:
+        args += ["-to", f"{doc.trim.end:.3f}"]
+    return args
+
+
+def plan_render(doc: EditDoc, src: Path, dst: Path, workdir: Path,
+                preset: str = "mp4", quality: int = 60,
+                has_audio: bool = True) -> Plan:
+    """A full export."""
+    doc.validate()
+    if preset not in PRESETS:
+        raise ValueError(f"unknown preset {preset!r}; expected one of {sorted(PRESETS)}")
+    p = PRESETS[preset]
+
+    chain, textfiles = build_chain(doc, workdir)
+    if p.max_width or p.max_fps:
+        extra = []
+        if p.max_fps:
+            extra.append(f"fps={p.max_fps}")
+        if p.max_width:
+            # -1 keeps the aspect; force even output for codecs that need it.
+            extra.append(f"scale='min({p.max_width},iw)':-2:flags=lanczos")
+        chain = ",".join(filter(None, [chain, *extra]))
+
+    if p.name == "gif":
+        return _plan_gif(doc, src, dst, chain, textfiles)
+
+    argv = [
+        "ffmpeg", "-y", "-hide_banner", "-nostdin",
+        *_trim_args(doc), "-i", str(src),
+        "-vf", chain,
+        *p.video, *quality_args(p, quality),
+        *(p.audio if has_audio else ["-an"]),
+        "-progress", "pipe:1", "-nostats",
+        str(dst),
+    ]
+    return Plan(argv=argv, textfiles=textfiles)
+
+
+def _plan_gif(doc: EditDoc, src: Path, dst: Path, chain: str,
+              textfiles: dict[Path, str]) -> Plan:
+    """GIF needs its palette computed from the finished frames, so: two passes.
+
+    A single-pass GIF is limited to a generic 256-colour palette and looks it.
+    """
+    palette = dst.with_suffix(".palette.png")
+    first = [
+        "ffmpeg", "-y", "-hide_banner", "-nostdin",
+        *_trim_args(doc), "-i", str(src),
+        "-vf", f"{chain},palettegen=stats_mode=diff",
+        str(palette),
+    ]
+    second = [
+        "ffmpeg", "-y", "-hide_banner", "-nostdin",
+        *_trim_args(doc), "-i", str(src), "-i", str(palette),
+        "-lavfi", f"{chain}[x];[x][1:v]paletteuse=dither=bayer:bayer_scale=3",
+        "-progress", "pipe:1", "-nostats",
+        str(dst),
+    ]
+    return Plan(argv=first, textfiles=textfiles, second_pass=second)
+
+
+def plan_preview(doc: EditDoc, src: Path, dst: Path, workdir: Path,
+                 t: float) -> Plan:
+    """A single frame at `t` seconds into the *trimmed* clip.
+
+    Shares build_chain with plan_render, which is the whole point: this frame is
+    proof of what the export will contain, not an approximation of it.
+    """
+    doc.validate()
+    chain, textfiles = build_chain(doc, workdir)
+    seek = doc.trim.start + max(0.0, t)
+    argv = [
+        "ffmpeg", "-y", "-hide_banner", "-nostdin",
+        "-ss", f"{seek:.3f}", "-i", str(src),
+        "-vf", chain,
+        "-frames:v", "1", "-q:v", "3",
+        str(dst),
+    ]
+    return Plan(argv=argv, textfiles=textfiles)

@@ -1,0 +1,26 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Node / Vite
+node_modules/
+web/dist/
+
+# Runtime data
+uploads/
+renders/
+*.db
+*.sqlite3
+
+# Rendered output
+*_tagged.mp4
+*_tagged.webm
+*_tagged.gif
+*_tagged.mov

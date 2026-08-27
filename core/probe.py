@@ -1,0 +1,49 @@
+"""Read what ffmpeg thinks is in a media file."""
+
+from __future__ import annotations
+
+import json
+import subprocess
+from pathlib import Path
+
+from .doc import Source
+
+
+class ProbeError(RuntimeError):
+    """The file could not be read as video."""
+
+
+def probe(path: Path) -> tuple[Source, bool]:
+    """Return the video's parameters and whether it carries an audio stream."""
+    out = subprocess.run(
+        ["ffprobe", "-v", "error", "-show_streams", "-show_format",
+         "-of", "json", str(path)],
+        capture_output=True, text=True,
+    )
+    if out.returncode != 0:
+        raise ProbeError(out.stderr.strip() or f"ffprobe failed on {path}")
+
+    data = json.loads(out.stdout)
+    streams = data.get("streams", [])
+    video = next((s for s in streams if s.get("codec_type") == "video"), None)
+    if video is None:
+        raise ProbeError(f"no video stream in {path.name}")
+
+    # Container duration is more reliable than the stream's for trimmed files.
+    duration = float(data.get("format", {}).get("duration")
+                     or video.get("duration") or 0.0)
+
+    return Source(
+        width=int(video["width"]),
+        height=int(video["height"]),
+        fps=_fps(video.get("avg_frame_rate") or video.get("r_frame_rate")),
+        duration=duration,
+    ), any(s.get("codec_type") == "audio" for s in streams)
+
+
+def _fps(rate: str | None) -> float:
+    """ffprobe reports frame rate as a rational string like '60/1'."""
+    if not rate or "/" not in rate:
+        return float(rate) if rate else 0.0
+    num, den = rate.split("/")
+    return float(num) / float(den) if float(den) else 0.0

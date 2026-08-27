@@ -1,0 +1,26 @@
+[project]
+name = "video-overlay"
+version = "0.1.0"
+description = "Burn name / roll no / department onto a video"
+readme = "README.md"
+authors = [
+    { name = "Exyons", email = "exyons007@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "numpy>=2.5.2",
+    "opencv-python>=5.0.0.93",
+    "pillow>=12.3.0",
+]
+
+[tool.uv]
+package = false
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]

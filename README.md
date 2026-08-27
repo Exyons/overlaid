@@ -1,0 +1,72 @@
+# video-editing
+
+Burns a name / roll number / department card onto a video, plus trim, crop,
+resize and format conversion. CLI today; a browser UI is being built on the
+same core.
+
+## Run
+
+```bash
+uv run python overlay.py INPUT.mp4 \
+  --name "Your Name" \
+  --roll "21BCE1234" \
+  --dept "Computer Science & Engineering"
+```
+
+Writes `INPUT_tagged.mp4` beside the input unless `-o` says otherwise.
+
+## Options
+
+| Flag | Default | Notes |
+|---|---|---|
+| `--pos` | `bottom-right` | also `bottom-left`, `top-left`, `top-right` |
+| `--size` | `3.0` | text height as a % of video height, so it scales with resolution |
+| `--no-box` | off | drops the dark plate behind the text |
+| `--font` | DejaVu Sans Bold | any TTF path |
+| `--format` | `mp4` | `mp4`, `webm`, `gif`, `mov` |
+| `--quality` | `60` | 0-100, mapped onto each codec's own scale |
+| `--normalize` | off | letterbox to `1920x1080`, or pass `WxH` |
+| `-o` | — | output path |
+
+## --normalize
+
+Capture tools emit odd frame sizes — this repo was built against an 1856x1116
+OBS recording — and some upload portals reject anything non-standard. This
+scales to fit and pads the remainder black, so the aspect ratio survives instead
+of being squeezed. Text is drawn after the pad, so it never lands in a bar.
+
+## Layout
+
+```
+core/
+  doc.py        the edit document: dataclasses, JSON, validation
+  compile.py    EditDoc -> ffmpeg argv.  Pure: no subprocess, no I/O
+  probe.py      ffprobe wrapper
+  run.py        executes a compiled plan, reports progress
+overlay.py      CLI, a thin client of core/
+api/            FastAPI (phase 1)
+web/            Vite + React + TS (phase 1)
+```
+
+`compile.py` is deliberately pure — it takes a document and returns a plan. That
+is what lets the whole filter chain be tested as a string, and what will let the
+browser preview and the final export share one code path rather than two that
+drift.
+
+Design notes: `docs/superpowers/specs/2026-08-28-video-editor-design.md`
+
+## Notes
+
+Text is passed to ffmpeg through a sidecar file, not inline on the command line.
+Inline text has to survive two layers of ffmpeg parsing, and no escaping scheme
+handles apostrophes, `%` and backslashes together — all three turn up in real
+names and department strings.
+
+## Tests
+
+```bash
+uv run pytest
+```
+
+Most of the suite asserts on compiled filter strings and needs no ffmpeg. A
+handful render a committed two-second fixture for real and probe the result.

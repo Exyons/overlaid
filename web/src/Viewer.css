@@ -1,0 +1,129 @@
+.viewer { display: grid; grid-template-rows: auto 1fr auto; height: 100%; }
+
+/* Chrome ---------------------------------------------------------------- */
+
+.bar {
+  display: flex; align-items: center; gap: 16px;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+}
+.bar .back { padding: 6px 12px; font-size: 13px; }
+.bar h2 { font: 450 15px/1 var(--sans); margin: 0; }
+.bar .spec { display: flex; gap: 14px; margin-left: auto; font: 400 12px/1 var(--mono); color: var(--ink-faint); }
+
+/* Stage ----------------------------------------------------------------- */
+
+.stage {
+  display: grid; place-items: center;
+  padding: 24px 24px 18px;
+  min-height: 0;
+  background:
+    repeating-conic-gradient(#1b1c1e 0% 25%, #1e1f22 0% 50%) 50% / 22px 22px;
+}
+.gate {
+  position: relative;
+  max-width: 100%; max-height: 100%;
+  padding: 2px;
+  background: var(--line);
+  line-height: 0;
+  transition: background 240ms var(--ease);
+}
+/* The matte reports the frame's state without covering it. Verified is the
+   resting state, so it stays quiet; approximate is transient and unresolved,
+   so it is the one that asks for attention. */
+.gate.verified { background: #2f5153; }
+.gate.approx   { background: var(--approx); }
+.gate video, .gate img {
+  display: block;
+  max-width: 100%; max-height: calc(100vh - 250px);
+  width: auto; height: auto;
+}
+.gate img { position: absolute; inset: 2px; width: calc(100% - 4px); height: calc(100% - 4px); object-fit: contain; }
+
+/* The proof readout: an instrument reports its own confidence. It sits with the
+   transport, where readouts belong, not over the picture. */
+.proof {
+  display: flex; align-items: center; gap: 9px;
+  padding: 7px 12px;
+  border: 1px solid currentColor;
+  border-radius: 2px;
+  font: 600 10px/1 var(--cond);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  transition: color 240ms var(--ease);
+}
+.proof.approx   { color: var(--approx); }
+.proof.verified { color: var(--verified); }
+.proof .lamp {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 8px currentColor;
+}
+.proof.approx .lamp { animation: pulse 1.5s var(--ease) infinite; }
+.proof .what { color: var(--ink-dim); letter-spacing: 0.1em; font-weight: 500; }
+
+@keyframes pulse { 50% { opacity: 0.25; } }
+
+/* The develop: a real frame fading in over the approximation. */
+.gate img { animation: develop 260ms var(--ease); }
+@keyframes develop { from { opacity: 0; } to { opacity: 1; } }
+
+.stage .failed {
+  color: var(--danger); font-size: 14px;
+  border-left: 2px solid var(--danger); padding-left: 12px;
+}
+
+/* Transport ------------------------------------------------------------- */
+
+.transport {
+  border-top: 1px solid var(--line);
+  background: var(--panel);
+  padding: 10px 20px 14px;
+  display: grid; gap: 6px;
+}
+.transport .row { display: flex; align-items: center; gap: 14px; }
+.transport .tc-big { font: 500 21px/1 var(--mono); letter-spacing: -0.02em; }
+.transport .of { color: var(--ink-faint); font: 400 13px/1 var(--mono); }
+.transport .frame-no { font: 400 12px/1 var(--mono); color: var(--ink-faint); }
+.transport .grow { flex: 1; }
+
+.scrub {
+  position: relative; height: 34px;
+  display: flex; align-items: center; cursor: pointer;
+  background: var(--surround);
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  /* Film-perforation ticks: a strip of frames, not an abstract slider. */
+  background-image: repeating-linear-gradient(
+    to right, var(--line) 0 1px, transparent 1px 40px);
+}
+.scrub .played {
+  position: absolute; top: 0; bottom: 0; left: 0;
+  background: rgba(87, 210, 210, 0.08);
+  border-right: 1px solid rgba(87, 210, 210, 0.25);
+}
+.scrub input {
+  position: relative; width: 100%; margin: 0;
+  appearance: none; background: none; height: 34px; cursor: pointer;
+}
+.scrub input::-webkit-slider-thumb {
+  appearance: none; width: 3px; height: 34px;
+  background: var(--verified); border: none; border-radius: 0;
+  box-shadow: 0 0 6px rgba(87, 210, 210, 0.6);
+}
+.scrub input::-moz-range-thumb {
+  width: 3px; height: 34px; border: none; border-radius: 0;
+  background: var(--verified);
+}
+.scrub input:focus-visible { outline-offset: -2px; }
+
+.hint { font-size: 12px; color: var(--ink-faint); }
+.hint kbd {
+  /* Arrow glyphs are missing from Plex Mono, so keys are set in the sans face. */
+  font: 500 11px/1 var(--sans);
+  background: var(--raised); border: 1px solid var(--line);
+  border-radius: 2px; padding: 3px 6px;
+  color: var(--ink-dim);
+}
+.arrow { font-family: var(--sans); }

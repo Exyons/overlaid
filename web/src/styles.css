@@ -1,0 +1,82 @@
+/* Overlaid — a grading-suite palette.
+
+   The greys are deliberately neutral and mid-dark: you cannot judge an image
+   against a coloured or bright surround, which is why every editing suite on
+   earth looks like this. It is a constraint borrowed from the work, not a mood.
+
+   Two accents, and both carry meaning rather than decoration:
+     cyan  — this is a real rendered frame, what the export will contain
+     amber — this is an approximation, not yet verified
+   Nothing else in the interface is allowed to use them. */
+
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@500;600&family=IBM+Plex+Sans:wght@400;450;600&display=swap');
+
+:root {
+  --surround: #17181a;      /* the room */
+  --panel:    #202225;      /* instrument face */
+  --raised:   #292c30;
+  --line:     #34383d;
+  --line-lit: #454a51;
+
+  --ink:      #e9e7e4;      /* warm white, paper under tungsten */
+  --ink-dim:  #9a9ea4;
+  --ink-faint:#6b7076;
+
+  --verified: #57d2d2;      /* waveform trace */
+  --approx:   #dfa145;      /* amber */
+  --danger:   #e0705f;
+
+  --sans: 'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif;
+  --cond: 'IBM Plex Sans Condensed', 'IBM Plex Sans', ui-sans-serif, sans-serif;
+  --mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+
+  --r: 3px;                 /* hardware panels are not rounded */
+  --ease: cubic-bezier(0.2, 0, 0.1, 1);
+}
+
+* { box-sizing: border-box; }
+
+html, body, #root { height: 100%; }
+
+body {
+  margin: 0;
+  background: var(--surround);
+  color: var(--ink);
+  font: 400 15px/1.5 var(--sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Panel labels are silkscreened onto hardware in condensed caps. */
+.label {
+  font: 600 11px/1 var(--cond);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+.mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+
+button {
+  font: 450 14px/1 var(--sans);
+  color: var(--ink);
+  background: var(--raised);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  padding: 8px 14px;
+  cursor: pointer;
+  transition: background 120ms var(--ease), border-color 120ms var(--ease);
+}
+button:hover:not(:disabled) { background: #31353a; border-color: var(--line-lit); }
+button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+:focus-visible {
+  outline: 2px solid var(--verified);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

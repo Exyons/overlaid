@@ -35,6 +35,21 @@ OBS recording — and some upload portals reject anything non-standard. This
 scales to fit and pads the remainder black, so the aspect ratio survives instead
 of being squeezed. Text is drawn after the pad, so it never lands in a bar.
 
+## Browser UI
+
+```bash
+./run.sh build     # compile the frontend once
+./run.sh serve     # http://127.0.0.1:8787
+```
+
+For development, `./run.sh dev` runs FastAPI with reload on 8787 and Vite on
+5173, with `/api` proxied across. Set `PORT` to move the backend.
+
+Upload a video, scrub it, and every time the playhead settles the viewer fetches
+a real frame from the renderer. The matte around the picture and the readout by
+the transport say which you are looking at: amber while it is the browser's
+approximation, cyan once the renderer has confirmed it.
+
 ## Layout
 
 ```
@@ -44,8 +59,14 @@ core/
   probe.py      ffprobe wrapper
   run.py        executes a compiled plan, reports progress
 overlay.py      CLI, a thin client of core/
-api/            FastAPI (phase 1)
-web/            Vite + React + TS (phase 1)
+api/
+  main.py       routes
+  db.py         sqlite3: projects + renders
+web/            Vite + React + TS
+  src/
+    Library.tsx   upload, project list
+    Viewer.tsx    player, scrubber, proof state
+data/           uploads, renders, sqlite (gitignored)
 ```
 
 `compile.py` is deliberately pure — it takes a document and returns a plan. That

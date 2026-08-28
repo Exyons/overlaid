@@ -18,8 +18,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from core import fonts
-from core.compile import PRESETS, plan_preview
+from core import encoders, fonts
+from core.compile import PRESETS, plan_preview, quality_value, quality_word
 from core.doc import DocError, EditDoc, Output
 from core.probe import ProbeError, probe
 from core.run import RenderError, run
@@ -231,19 +231,38 @@ def _render_json(r) -> dict[str, Any]:
     return {"id": r.id, "project_id": r.project_id, "preset": r.preset,
             "status": r.status, "progress": r.progress,
             "error": r.error, "created_at": r.created_at,
+            "encoder": r.encoder, "size": r.size,
             "ready": r.status == "done"}
 
 
 @app.post("/api/projects/{pid}/renders", status_code=202)
 def start_render(pid: str, preset: str = Body("mp4", embed=True),
-                 quality: int = Body(60, embed=True)) -> dict[str, Any]:
+                 quality: int = Body(75, embed=True),
+                 accel: str = Body("auto", embed=True)) -> dict[str, Any]:
     """Queue an export. Returns immediately; poll the render for progress."""
     project = _project_or_404(pid)
     if preset not in PRESETS:
         raise HTTPException(400, f"unknown preset {preset!r}")
     EditDoc.from_dict(project.doc).validate()      # fail now, not on the worker
-    rid = jobs.submit(pid, preset, quality)
+    rid = jobs.submit(pid, preset, quality, accel)
     return _render_json(db.get_render(rid))
+
+
+@app.get("/api/encoders")
+def list_encoders() -> list[dict[str, Any]]:
+    """Encoders this machine can really use, fastest first.
+
+    Probed rather than read off `ffmpeg -encoders`, which lists what the binary
+    supports rather than what the hardware here will accept.
+    """
+    return [{"name": e.name, "label": e.label, "kind": e.kind}
+            for e in encoders.available()]
+
+
+@app.get("/api/quality")
+def describe_quality(preset: str = Query("mp4"), quality: int = Query(75)) -> dict[str, Any]:
+    """What a slider position actually means, so the number is not a mystery."""
+    return {"word": quality_word(quality), "value": quality_value(preset, quality)}
 
 
 @app.get("/api/projects/{pid}/renders")

@@ -163,7 +163,10 @@ export function Viewer({ id, onBack }: { id: string; onBack: () => void }) {
 
       <div className="workspace">
         <div className="stage">
-          <div className={`gate ${verified ? 'verified' : 'approx'}`}>
+          <div
+            className={`gate ${verified ? 'verified' : 'approx'}`}
+            style={{ '--ar': `${out.width} / ${out.height}` } as React.CSSProperties}
+          >
             <video
               ref={video}
               src={api.sourceUrl(id)}

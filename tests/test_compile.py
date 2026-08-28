@@ -6,8 +6,9 @@ import pytest
 
 from core.compile import (
     PRESETS, anchor_expr, build_chain, fit_inside, plan_preview, plan_render,
-    quality_args,
+    quality_args, quality_value, quality_word,
 )
+from core.encoders import CPU
 from core.doc import Crop, DocError, EditDoc, Output, Source, TextOverlay, Trim
 
 WORK = Path("/tmp/work")
@@ -199,12 +200,82 @@ def test_every_preset_compiles(preset):
     assert p.argv[0] == "ffmpeg"
 
 
-def test_quality_slider_maps_onto_each_codec_scale():
-    assert quality_args(PRESETS["mp4"], 100) == ["-crf", "0"]
-    assert quality_args(PRESETS["mp4"], 0) == ["-crf", "51"]
+def test_maximum_quality_is_visually_lossless_not_mathematically_lossless():
+    """CRF 0 reproduces the source's own compression artefacts exactly, and
+    measured 7.7x the size of a 12 Mb/s input. Nobody means that by 100%."""
+    assert quality_value("mp4", 100) == 16
+    assert quality_value("webm", 100) == 20
+
+
+def test_quality_slider_stays_inside_the_usable_range():
+    for q in range(0, 101, 5):
+        assert 16 <= quality_value("mp4", q) <= 36
+
+
+def test_quality_slider_is_monotonic():
+    values = [quality_value("mp4", q) for q in range(0, 101, 5)]
+    assert values == sorted(values, reverse=True)
+
+
+def test_quality_has_a_plain_language_name():
+    assert quality_word(100) == "Visually lossless"
+    assert quality_word(0) == "Smaller file"
+
+
+def test_formats_without_a_quality_knob_get_no_flag():
     assert quality_args(PRESETS["mov"], 50) == []   # ProRes has no CRF
+    assert quality_args(PRESETS["gif"], 50) == []
+
+
+def test_cpu_encoder_emits_crf():
+    args = quality_args(PRESETS["mp4"], 100, CPU)
+    assert args[:2] == ["-c:v", "libx264"]
+    assert "-crf" in args and args[args.index("-crf") + 1] == "16"
 
 
 def test_unknown_preset_is_rejected():
     with pytest.raises(ValueError, match="unknown preset"):
         plan_render(doc(), Path("i"), Path("o"), WORK, preset="avi")
+
+
+# --- encoder selection ------------------------------------------------------
+
+
+def test_forcing_cpu_uses_libx264():
+    p = plan_render(doc(), Path("i"), Path("o.mp4"), WORK, accel="cpu")
+    assert "libx264" in p.argv
+    assert p.encoder == "CPU (libx264)"
+
+
+def test_an_unusable_encoder_falls_back_to_cpu():
+    """A machine that loses its GPU should still finish the export."""
+    p = plan_render(doc(), Path("i"), Path("o.mp4"), WORK, accel="h264_imaginary")
+    assert "libx264" in p.argv
+
+
+def test_auto_picks_something_that_actually_works():
+    from core import encoders
+    p = plan_render(doc(), Path("i"), Path("o.mp4"), WORK, accel="auto")
+    assert p.encoder in {e.label for e in encoders.available()}
+
+
+def test_only_mp4_takes_an_encoder():
+    for preset in ("webm", "mov", "gif"):
+        p = plan_render(doc(), Path("i"), Path("o"), WORK, preset=preset)
+        assert p.encoder is None
+
+
+def test_preview_never_seeks_past_the_last_frame():
+    """Seeking to the exact end produced an empty file and a failed render."""
+    d = doc()                                   # 70.65s at 60 fps
+    p = plan_preview(d, Path("i"), Path("f.jpg"), WORK, t=d.duration)
+    # Compare the formatted string, since that is what ffmpeg is handed:
+    # rounding to milliseconds is what made a one-frame clamp overshoot.
+    printed = float(p.argv[p.argv.index("-ss") + 1])
+    assert printed < d.duration - 1 / 60
+
+
+def test_preview_clamps_a_seek_beyond_the_clip():
+    d = doc()
+    p = plan_preview(d, Path("i"), Path("f.jpg"), WORK, t=9999)
+    assert float(p.argv[p.argv.index("-ss") + 1]) < d.duration

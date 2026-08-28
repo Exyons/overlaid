@@ -70,6 +70,33 @@ the text grows inward and a longer line cannot push itself off the edge. Drag
 for anywhere else; the control then reads "custom" rather than claiming a corner
 the text is no longer in.
 
+## Export
+
+Quality is a 0-100 slider mapped into the *usable* part of each codec's scale,
+not the whole of it. 100 means visually lossless (H.264 CRF 16), not
+mathematically lossless: CRF 0 reproduces the source's own compression
+artefacts exactly and measured 7.7x the size of a 12 Mb/s screen capture. The
+slider's floor stops where the picture is still worth looking at.
+
+H.264 exports use hardware encoding when the machine has it. Encoders are found
+by probing -- a real one-frame encode -- rather than by reading
+`ffmpeg -encoders`, which lists what the binary supports rather than what the
+hardware will accept. A laptop with a switchable NVIDIA card advertises NVENC
+and then fails at CUDA init; VAAPI will bind to a render node whose driver
+cannot encode. Anything that fails its probe is not offered, and an encoder that
+stops working falls back to libx264 rather than failing the export.
+
+Measured on a 70s 1856x1116 60fps capture:
+
+| | Time | Size |
+|---|---|---|
+| Quick Sync, quality 75 | 21s | 55 MB |
+| Quick Sync, quality 100 | 20s | 92 MB |
+| libx264, quality 100 | 63s | 78 MB |
+
+Hardware is several times faster; libx264 spends longer and fits more picture
+into the same bitrate.
+
 ## Layout
 
 ```

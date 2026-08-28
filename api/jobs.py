@@ -28,10 +28,11 @@ class Jobs:
         self._worker: threading.Thread | None = None
         self._lock = threading.Lock()
 
-    def submit(self, project_id: str, preset: str, quality: int) -> str:
+    def submit(self, project_id: str, preset: str, quality: int,
+               accel: str = "auto") -> str:
         """Queue a render and return its id."""
         render = self.db.create_render(project_id, preset)
-        self._q.put(f"{render.id}\t{quality}")
+        self._q.put(f"{render.id}\t{quality}\t{accel}")
         self._ensure_worker()
         return render.id
 
@@ -49,15 +50,15 @@ class Jobs:
                 item = self._q.get(timeout=30)
             except queue.Empty:
                 return                      # idle: let the thread go
-            rid, _, quality = item.partition("\t")
+            rid, quality, accel = item.split("\t")
             try:
-                self._render(rid, int(quality))
+                self._render(rid, int(quality), accel)
             except Exception as e:          # a crash must not kill the worker
                 self.db.update_render(rid, status="failed", error=str(e))
             finally:
                 self._q.task_done()
 
-    def _render(self, rid: str, quality: int) -> None:
+    def _render(self, rid: str, quality: int, accel: str = "auto") -> None:
         render = self.db.get_render(rid)
         if render is None:
             return
@@ -83,9 +84,11 @@ class Jobs:
         try:
             plan = plan_render(doc, project.src_path, out, self.workdir / rid,
                                preset=render.preset, quality=quality,
-                               has_audio=project.has_audio)
+                               has_audio=project.has_audio, accel=accel)
+            self.db.update_render(rid, encoder=plan.encoder)
             run(plan, total=doc.duration, on_progress=report)
         except (RenderError, ValueError) as e:
             self.db.update_render(rid, status="failed", error=str(e))
             return
-        self.db.update_render(rid, status="done", progress=1.0, out_path=str(out))
+        self.db.update_render(rid, status="done", progress=1.0, out_path=str(out),
+                              size=out.stat().st_size if out.exists() else None)

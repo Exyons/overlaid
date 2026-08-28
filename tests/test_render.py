@@ -96,3 +96,43 @@ def test_progress_is_reported_monotonically(src, tmp_path):
     assert seen, "no progress reported"
     assert seen == sorted(seen)
     assert seen[-1] == 1.0
+
+
+def test_preview_at_the_very_end_of_the_clip_succeeds(src, tmp_path):
+    """Playback stops exactly at the duration, and previewing there used to ask
+    ffmpeg for a frame past the last one: it wrote an empty file and failed."""
+    source, _ = src
+    doc = build(source)
+    out = tmp_path / "end.png"
+    run(plan_preview(doc, FIXTURE, out, tmp_path, t=source.duration), total=0)
+    assert out.exists() and out.stat().st_size > 0
+
+
+def test_preview_past_the_end_succeeds(src, tmp_path):
+    source, _ = src
+    doc = build(source)
+    out = tmp_path / "past.png"
+    run(plan_preview(doc, FIXTURE, out, tmp_path, t=source.duration + 30), total=0)
+    assert out.exists() and out.stat().st_size > 0
+
+
+def test_hardware_export_produces_a_playable_file(src, tmp_path):
+    """Whatever 'auto' picks must actually decode afterwards."""
+    source, _ = src
+    doc = build(source)
+    out = tmp_path / "hw.mp4"
+    plan = plan_render(doc, FIXTURE, out, tmp_path, accel="auto")
+    run(plan, total=doc.duration)
+    probed, _ = probe(out)
+    assert (probed.width, probed.height) == (source.width, source.height)
+    assert probed.duration > 0
+
+
+def test_maximum_quality_is_not_wildly_larger_than_the_source(src, tmp_path):
+    """CRF 0 produced files 7.7x the input. Full quality should stay sane."""
+    source, _ = src
+    doc = build(source)
+    out = tmp_path / "q100.mp4"
+    run(plan_render(doc, FIXTURE, out, tmp_path, quality=100, accel="cpu"),
+        total=doc.duration)
+    assert out.stat().st_size < FIXTURE.stat().st_size * 4

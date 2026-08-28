@@ -40,7 +40,9 @@ CREATE TABLE IF NOT EXISTS renders (
     status      TEXT NOT NULL,      -- queued | running | done | failed
     progress    REAL NOT NULL DEFAULT 0,
     out_path    TEXT,
-    error       TEXT
+    error       TEXT,
+    encoder     TEXT,
+    size        INTEGER
 );
 
 CREATE INDEX IF NOT EXISTS renders_by_project ON renders(project_id, created_at DESC);
@@ -68,6 +70,8 @@ class Render:
     progress: float
     out_path: Path | None
     error: str | None
+    encoder: str | None = None
+    size: int | None = None
 
 
 class Db:
@@ -76,6 +80,19 @@ class Db:
         path.parent.mkdir(parents=True, exist_ok=True)
         with self.conn() as c:
             c.executescript(SCHEMA)
+            self._migrate(c)
+
+    @staticmethod
+    def _migrate(c: sqlite3.Connection) -> None:
+        """Add columns that postdate the original schema.
+
+        CREATE TABLE IF NOT EXISTS does nothing to a table that already exists,
+        so databases made before a column was introduced need it added here.
+        """
+        have = {r["name"] for r in c.execute("PRAGMA table_info(renders)")}
+        for column, decl in (("encoder", "TEXT"), ("size", "INTEGER")):
+            if column not in have:
+                c.execute(f"ALTER TABLE renders ADD COLUMN {column} {decl}")
 
     @contextmanager
     def conn(self) -> Iterator[sqlite3.Connection]:
@@ -196,4 +213,6 @@ def _render(row: sqlite3.Row) -> Render:
         preset=row["preset"], status=row["status"], progress=row["progress"],
         out_path=Path(row["out_path"]) if row["out_path"] else None,
         error=row["error"],
+        encoder=row["encoder"],
+        size=row["size"],
     )

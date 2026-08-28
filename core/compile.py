@@ -16,6 +16,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from . import encoders
 from .doc import Box, EditDoc, TextOverlay
 
 # Text is passed to drawtext through a sidecar file rather than inline. Inline
@@ -34,6 +35,8 @@ class Plan:
     textfiles: dict[Path, str] = field(default_factory=dict)
     #: Set when the format needs more than one ffmpeg invocation (GIF).
     second_pass: list[str] | None = None
+    #: Which encoder was chosen, for reporting back to the user.
+    encoder: str | None = None
 
     def materialise(self) -> None:
         """Write the sidecar text files this plan's argv refers to."""
@@ -189,7 +192,7 @@ class Preset:
 PRESETS: dict[str, Preset] = {
     "mp4": Preset(
         "mp4", ".mp4",
-        ["-c:v", "libx264", "-preset", "medium", "-pix_fmt", "yuv420p"],
+        [],                                     # supplied by the chosen encoder
         ["-c:a", "aac", "-b:a", "192k"],
     ),
     "webm": Preset(
@@ -212,18 +215,53 @@ PRESETS: dict[str, Preset] = {
     ),
 }
 
-#: Each preset's quality knob means something different, so the UI's single
-#: 0-100 slider is mapped per codec rather than passed through as a raw CRF.
-_QUALITY_RANGE = {"mp4": (51, 0), "webm": (63, 0)}
+# The quality slider is mapped into the usable part of each codec's scale, not
+# the whole of it.
+#
+# H.264 CRF 0 is mathematically lossless, which is not what anyone means by
+# "maximum quality": the source is already a lossy encode, so CRF 0 spends an
+# enormous bitrate reproducing the source's own compression artefacts exactly.
+# Measured on a 12 Mb/s screen capture, it produced a file 7.7x the size of the
+# input. CRF 16 is visually indistinguishable at roughly a tenth of that.
+#
+# The bottom end stops where the picture is still worth looking at rather than
+# at the codec's true floor, since no one wants the unusable half of a slider.
+_QUALITY_RANGE = {
+    "mp4": (36, 16),        # H.264-family QP scale: worst usable, best useful
+    "webm": (46, 20),       # VP9 CRF
+}
+
+QUALITY_WORDS = (
+    (95, "Visually lossless"),
+    (80, "Very high"),
+    (60, "High"),
+    (35, "Good"),
+    (0, "Smaller file"),
+)
 
 
-def quality_args(preset: Preset, quality: int) -> list[str]:
+def quality_word(quality: int) -> str:
+    """Plain-language name for a slider position."""
+    return next(word for floor, word in QUALITY_WORDS if quality >= floor)
+
+
+def quality_value(preset_name: str, quality: int) -> int | None:
+    """The number this codec wants, or None if it has no quality control."""
+    if preset_name not in _QUALITY_RANGE:
+        return None
+    worst, best = _QUALITY_RANGE[preset_name]
+    return round(worst + (best - worst) * (max(0, min(100, quality)) / 100))
+
+
+def quality_args(preset: Preset, quality: int,
+                 encoder: encoders.Encoder | None = None) -> list[str]:
     """Map a 0-100 quality slider onto the codec's own scale."""
-    if preset.name not in _QUALITY_RANGE:
+    value = quality_value(preset.name, quality)
+    if value is None:
         return []
-    worst, best = _QUALITY_RANGE[preset.name]
-    crf = round(worst + (best - worst) * (max(0, min(100, quality)) / 100))
-    return ["-crf", str(crf)]
+    if preset.name == "mp4" and encoder is not None:
+        return encoder.args(value)
+    return ["-crf", str(value)]
 
 
 # --- entry points ----------------------------------------------------------
@@ -240,37 +278,47 @@ def _trim_args(doc: EditDoc) -> list[str]:
 
 
 def plan_render(doc: EditDoc, src: Path, dst: Path, workdir: Path,
-                preset: str = "mp4", quality: int = 60,
-                has_audio: bool = True) -> Plan:
-    """A full export."""
+                preset: str = "mp4", quality: int = 75,
+                has_audio: bool = True, accel: str = "auto") -> Plan:
+    """A full export.
+
+    `accel` picks the encoder for H.264 output: "auto" takes the fastest one
+    this machine can really use, "cpu" forces libx264, or name an encoder.
+    Other presets are tied to their codec and ignore it.
+    """
     doc.validate()
     if preset not in PRESETS:
         raise ValueError(f"unknown preset {preset!r}; expected one of {sorted(PRESETS)}")
     p = PRESETS[preset]
+    encoder = encoders.resolve(accel) if p.name == "mp4" else None
 
     chain, textfiles = build_chain(doc, workdir)
-    if p.max_width or p.max_fps:
-        extra = []
-        if p.max_fps:
-            extra.append(f"fps={p.max_fps}")
-        if p.max_width:
-            # -1 keeps the aspect; force even output for codecs that need it.
-            extra.append(f"scale='min({p.max_width},iw)':-2:flags=lanczos")
-        chain = ",".join(filter(None, [chain, *extra]))
+    if p.max_fps:
+        chain = ",".join(filter(None, [chain, f"fps={p.max_fps}"]))
+    if p.max_width:
+        # -1 keeps the aspect; force even output for codecs that need it.
+        chain = ",".join(filter(None, [
+            chain, f"scale='min({p.max_width},iw)':-2:flags=lanczos"]))
 
     if p.name == "gif":
         return _plan_gif(doc, src, dst, chain, textfiles)
 
+    if encoder is not None and encoder.filter_suffix:
+        # VAAPI encodes from GPU memory, so frames are uploaded after every
+        # filter that works on them.
+        chain = ",".join(filter(None, [chain, encoder.filter_suffix]))
+
     argv = [
         "ffmpeg", "-y", "-hide_banner", "-nostdin",
+        *(encoder.pre_input if encoder else ()),
         *_trim_args(doc), "-i", str(src),
         "-vf", chain,
-        *p.video, *quality_args(p, quality),
+        *p.video, *quality_args(p, quality, encoder),
         *(p.audio if has_audio else ["-an"]),
         "-progress", "pipe:1", "-nostats",
         str(dst),
     ]
-    return Plan(argv=argv, textfiles=textfiles)
+    return Plan(argv=argv, textfiles=textfiles, encoder=encoder.label if encoder else None)
 
 
 def _plan_gif(doc: EditDoc, src: Path, dst: Path, chain: str,
@@ -305,7 +353,17 @@ def plan_preview(doc: EditDoc, src: Path, dst: Path, workdir: Path,
     """
     doc.validate()
     chain, textfiles = build_chain(doc, workdir)
-    seek = doc.trim.start + max(0.0, t)
+    # Seeking to or past the end returns no frame at all: ffmpeg writes an empty
+    # file and fails. Playback stops exactly at the duration, so previewing
+    # there has to be clamped back inside the clip.
+    #
+    # The margin is a frame and a half rather than one. Seek times are formatted
+    # to milliseconds and rounding is to nearest, so a clamp of exactly one
+    # frame can still be printed as a time later than the final frame's
+    # timestamp -- 1.9666667 becomes "1.967" when the last frame is at 1.966667.
+    frame = 1.0 / (doc.source.fps or 25)
+    last = max(0.0, doc.duration - frame * 1.5)
+    seek = doc.trim.start + min(max(0.0, t), last)
     argv = [
         "ffmpeg", "-y", "-hide_banner", "-nostdin",
         "-ss", f"{seek:.3f}", "-i", str(src),

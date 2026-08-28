@@ -61,5 +61,13 @@ export interface Render {
   progress: number
   error: string | null
   created_at: number
+  encoder: string | null
+  size: number | null
   ready: boolean
+}
+
+export interface EncoderInfo {
+  name: string
+  label: string
+  kind: 'cpu' | 'gpu'
 }

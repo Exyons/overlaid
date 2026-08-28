@@ -18,12 +18,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from core import fonts
 from core.compile import PRESETS, plan_preview
 from core.doc import DocError, EditDoc, Output
 from core.probe import ProbeError, probe
 from core.run import RenderError, run
 
 from .db import Db, Project
+from .jobs import Jobs
 
 DATA = Path(__file__).resolve().parent.parent / "data"
 UPLOADS = DATA / "uploads"
@@ -36,6 +38,7 @@ MAX_UPLOAD = 4 * 1024**3
 ALLOWED_SUFFIXES = {".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v"}
 
 db = Db(DATA / "projects.db")
+jobs = Jobs(db, RENDERS, CACHE)
 
 
 @asynccontextmanager
@@ -166,25 +169,110 @@ def get_source(pid: str) -> FileResponse:
     return FileResponse(p.src_path)
 
 
-@app.get("/api/projects/{pid}/frame")
-def get_frame(pid: str, t: float = Query(0, ge=0)) -> FileResponse:
-    """A real rendered frame at `t` seconds into the trimmed clip.
-
-    This is the other half of the hybrid preview: the browser canvas draws an
-    approximation while the mouse is down, then asks for this to confirm. It
-    shares its filter chain with the export, so what it shows is what ships.
-    """
-    p = _project_or_404(pid)
-    doc = EditDoc.from_dict(p.doc)
-    out = CACHE / f"{pid}-{t:.3f}.jpg"
-
-    plan = plan_preview(doc, p.src_path, out, CACHE / pid, t=t)
+def _render_frame(p: Project, doc: EditDoc, t: float, tag: str) -> FileResponse:
+    out = CACHE / f"{p.id}-{tag}.jpg"
+    plan = plan_preview(doc, p.src_path, out, CACHE / p.id, t=t)
     try:
         run(plan, total=0)
     except RenderError as e:
         raise HTTPException(500, f"preview failed: {e}") from e
     return FileResponse(out, media_type="image/jpeg",
                         headers={"Cache-Control": "no-store"})
+
+
+@app.get("/api/projects/{pid}/frame")
+def get_frame(pid: str, t: float = Query(0, ge=0)) -> FileResponse:
+    """A real rendered frame from the project's saved document."""
+    p = _project_or_404(pid)
+    return _render_frame(p, EditDoc.from_dict(p.doc), t, f"{t:.3f}")
+
+
+@app.post("/api/projects/{pid}/frame")
+def post_frame(pid: str, t: float = Body(0), doc: dict[str, Any] = Body(...)) -> FileResponse:
+    """A real rendered frame from a document the client has not saved yet.
+
+    The editor sends the document it currently holds rather than relying on
+    autosave having landed first. That removes an ordering dependency between
+    saving and previewing -- and, more importantly, means the frame shown is
+    built from exactly the state on screen.
+    """
+    p = _project_or_404(pid)
+    parsed = EditDoc.from_dict(doc).validate()
+    return _render_frame(p, parsed, t, "live")
+
+
+# --- fonts -----------------------------------------------------------------
+
+
+@app.get("/api/fonts")
+def list_fonts() -> list[dict[str, Any]]:
+    return [{"id": f.id, "family": f.family, "style": f.style,
+             "label": f.label, "path": str(f.path)}
+            for f in fonts.available()]
+
+
+@app.get("/api/fonts/{fid}/file")
+def get_font_file(fid: str) -> FileResponse:
+    """The font file itself, so the canvas can draw with the face ffmpeg uses."""
+    font = fonts.by_id(fid)
+    if font is None or not font.path.exists():
+        raise HTTPException(404, f"no font {fid}")
+    return FileResponse(
+        font.path,
+        media_type="font/ttf" if font.path.suffix == ".ttf" else "font/otf",
+        headers={"Cache-Control": "public, max-age=31536000, immutable"},
+    )
+
+
+# --- renders ---------------------------------------------------------------
+
+
+def _render_json(r) -> dict[str, Any]:
+    return {"id": r.id, "project_id": r.project_id, "preset": r.preset,
+            "status": r.status, "progress": r.progress,
+            "error": r.error, "created_at": r.created_at,
+            "ready": r.status == "done"}
+
+
+@app.post("/api/projects/{pid}/renders", status_code=202)
+def start_render(pid: str, preset: str = Body("mp4", embed=True),
+                 quality: int = Body(60, embed=True)) -> dict[str, Any]:
+    """Queue an export. Returns immediately; poll the render for progress."""
+    project = _project_or_404(pid)
+    if preset not in PRESETS:
+        raise HTTPException(400, f"unknown preset {preset!r}")
+    EditDoc.from_dict(project.doc).validate()      # fail now, not on the worker
+    rid = jobs.submit(pid, preset, quality)
+    return _render_json(db.get_render(rid))
+
+
+@app.get("/api/projects/{pid}/renders")
+def list_renders(pid: str) -> list[dict[str, Any]]:
+    _project_or_404(pid)
+    return [_render_json(r) for r in db.list_renders(pid)]
+
+
+@app.get("/api/renders/{rid}")
+def get_render(rid: str) -> dict[str, Any]:
+    r = db.get_render(rid)
+    if r is None:
+        raise HTTPException(404, f"no render {rid}")
+    return _render_json(r)
+
+
+@app.get("/api/renders/{rid}/file")
+def download_render(rid: str) -> FileResponse:
+    r = db.get_render(rid)
+    if r is None:
+        raise HTTPException(404, f"no render {rid}")
+    if r.status != "done" or r.out_path is None:
+        raise HTTPException(409, f"render is {r.status}")
+    if not r.out_path.exists():
+        raise HTTPException(410, "the rendered file is gone")
+    project = db.get_project(r.project_id)
+    name = f"{project.name if project else 'video'}{r.out_path.suffix}"
+    return FileResponse(r.out_path, filename=name,
+                        media_type="application/octet-stream")
 
 
 @app.get("/api/presets")

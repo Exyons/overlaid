@@ -52,3 +52,14 @@ export interface Preset {
   warn: string | null
   has_quality: boolean
 }
+
+export interface Render {
+  id: string
+  project_id: string
+  preset: string
+  status: 'queued' | 'running' | 'done' | 'failed'
+  progress: number
+  error: string | null
+  created_at: number
+  ready: boolean
+}

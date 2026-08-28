@@ -1,4 +1,4 @@
-import type { EditDoc, Preset, Project } from './types'
+import type { EditDoc, Preset, Project, Render } from './types'
 
 async function json<T>(res: Response): Promise<T> {
   if (!res.ok) {
@@ -55,6 +55,35 @@ export const api = {
 
   presets: () => fetch('/api/presets').then(json<Preset[]>),
 
+  startRender: (id: string, preset: string, quality: number) =>
+    fetch(`/api/projects/${id}/renders`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ preset, quality }),
+    }).then(json<Render>),
+
+  getRender: (id: string) => fetch(`/api/renders/${id}`).then(json<Render>),
+
+  renderFileUrl: (id: string) => `/api/renders/${id}/file`,
+
   sourceUrl: (id: string) => `/api/projects/${id}/source`,
+
+  /** A frame from the saved document. Used for library thumbnails. */
   frameUrl: (id: string, t: number) => `/api/projects/${id}/frame?t=${t.toFixed(3)}`,
+
+  /** A frame from the document the editor is holding right now, saved or not.
+   *  Returns an object URL the caller owns and must revoke. */
+  async liveFrame(id: string, t: number, doc: EditDoc, signal?: AbortSignal) {
+    const res = await fetch(`/api/projects/${id}/frame`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ t, doc }),
+      signal,
+    })
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}))
+      throw new Error(body.detail ?? `Preview failed (${res.status})`)
+    }
+    return URL.createObjectURL(await res.blob())
+  },
 }

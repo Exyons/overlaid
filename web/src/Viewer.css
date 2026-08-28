@@ -127,3 +127,125 @@
   color: var(--ink-dim);
 }
 .arrow { font-family: var(--sans); }
+
+/* Workspace ------------------------------------------------------------- */
+
+.viewer { grid-template-rows: auto 1fr auto; }
+.workspace { display: grid; grid-template-columns: 1fr 300px; min-height: 0; }
+.workspace .stage { min-width: 0; }
+
+.bar .history { display: flex; gap: 6px; margin-left: 8px; }
+.bar .history button { padding: 5px 10px; font-size: 12px; }
+.bar .saving { color: var(--verified); font: 600 10px/1 var(--cond); letter-spacing: 0.14em; text-transform: uppercase; }
+
+/* The canvas sits over the frame in the same coordinate space, so a click
+   lands on the same pixel the renderer will draw. */
+.overlay-canvas {
+  position: absolute; inset: 2px;
+  width: calc(100% - 4px); height: calc(100% - 4px);
+  cursor: default;
+}
+.overlay-canvas.dragging { cursor: grabbing; }
+
+/* Panel ----------------------------------------------------------------- */
+
+.panel {
+  border-left: 1px solid var(--line);
+  background: var(--panel);
+  overflow-y: auto;
+  display: flex; flex-direction: column;
+}
+.panel-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 10px; padding: 12px 14px;
+  border-bottom: 1px solid var(--line);
+  position: sticky; top: 0; background: var(--panel); z-index: 1;
+}
+.panel-head button { padding: 5px 10px; font-size: 12px; }
+
+.inspector, .export { padding: 14px; display: grid; gap: 16px; align-content: start; }
+.inspector .nothing { color: var(--ink-faint); font-size: 13px; margin: 0; line-height: 1.5; }
+
+.field { display: grid; gap: 7px; }
+.field.row { grid-template-columns: 1fr 1fr; gap: 14px; align-items: start; }
+.field .value { color: var(--ink-dim); letter-spacing: 0; font-family: var(--mono); }
+.field .note { margin: 0; font-size: 11px; line-height: 1.45; color: var(--ink-faint); }
+
+.field textarea, .field select, .field input[type="text"] {
+  font: 400 13px/1.45 var(--sans);
+  color: var(--ink);
+  background: var(--surround);
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  padding: 7px 9px;
+  width: 100%;
+  resize: vertical;
+}
+.field select { cursor: pointer; }
+.field input[type="color"] {
+  width: 100%; height: 30px; padding: 2px;
+  background: var(--surround); border: 1px solid var(--line);
+  border-radius: 2px; cursor: pointer;
+}
+.field input[type="range"] {
+  appearance: none; width: 100%; height: 18px; background: none; cursor: pointer;
+}
+.field input[type="range"]::-webkit-slider-runnable-track { height: 2px; background: var(--line); }
+.field input[type="range"]::-moz-range-track { height: 2px; background: var(--line); }
+.field input[type="range"]::-webkit-slider-thumb {
+  appearance: none; margin-top: -5px;
+  width: 12px; height: 12px; border-radius: 50%;
+  background: var(--ink); border: none;
+}
+.field input[type="range"]::-moz-range-thumb {
+  width: 12px; height: 12px; border-radius: 50%; background: var(--ink); border: none;
+}
+.check { display: flex; align-items: center; gap: 7px; font-size: 13px; color: var(--ink-dim); cursor: pointer; }
+.check input { accent-color: var(--verified); }
+
+/* Nine anchors, laid out as the nine positions they name. */
+.anchor-grid {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px;
+  width: 84px; aspect-ratio: 16 / 9;
+}
+.anchor-grid button {
+  padding: 0; border: 1px solid var(--line); background: var(--surround);
+  border-radius: 1px; cursor: pointer;
+}
+.anchor-grid button:hover { background: var(--raised); }
+.anchor-grid button.on { background: var(--verified); border-color: var(--verified); }
+
+.remove {
+  margin-top: 4px; width: 100%;
+  border-color: var(--line); color: var(--ink-dim);
+}
+.remove:hover { border-color: var(--danger); color: var(--danger); }
+
+/* Export ---------------------------------------------------------------- */
+
+.export .go { width: 100%; background: var(--raised); border-color: var(--line-lit); }
+.export .go:hover:not(:disabled) { border-color: var(--verified); color: var(--verified); }
+.export .warn { margin: 0; font-size: 11px; line-height: 1.45; color: var(--approx); }
+.export .error-text { color: var(--danger); }
+.export .job { display: grid; gap: 8px; }
+.export .job .meter { width: 100%; height: 2px; background: var(--line); overflow: hidden; }
+.export .job .meter i { display: block; height: 100%; background: var(--verified); transition: width 200ms linear; }
+.export .pct { font-size: 12px; color: var(--ink-dim); }
+.export .download {
+  display: block; text-align: center; text-decoration: none;
+  padding: 9px 14px; border-radius: var(--r);
+  background: var(--verified); color: #10201f;
+  font: 600 13px/1 var(--sans);
+}
+.export .download:hover { filter: brightness(1.1); }
+
+.viewer .failed {
+  margin: 0; padding: 8px 20px;
+  color: var(--danger); font-size: 13px;
+  border-top: 1px solid var(--line);
+}
+
+@media (max-width: 900px) {
+  .workspace { grid-template-columns: 1fr; grid-template-rows: 1fr auto; }
+  .panel { border-left: none; border-top: 1px solid var(--line); max-height: 45vh; }
+}

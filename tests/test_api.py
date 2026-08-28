@@ -10,14 +10,25 @@ FIXTURE = Path(__file__).parent / "fixtures" / "2s.mp4"
 
 @pytest.fixture
 def client(tmp_path, monkeypatch):
-    """A fresh app whose data directory is thrown away after each test."""
+    """A fresh app whose data directory is thrown away after each test.
+
+    The job queue holds its own reference to the database, so it has to be
+    rebuilt alongside it -- patching only `db` leaves the worker writing to the
+    real one.
+    """
     import api.main as m
     from api.db import Db
+    from api.jobs import Jobs
 
-    monkeypatch.setattr(m, "UPLOADS", tmp_path / "uploads")
-    monkeypatch.setattr(m, "RENDERS", tmp_path / "renders")
-    monkeypatch.setattr(m, "CACHE", tmp_path / "cache")
-    monkeypatch.setattr(m, "db", Db(tmp_path / "t.db"))
+    db = Db(tmp_path / "t.db")
+    for name, value in [
+        ("UPLOADS", tmp_path / "uploads"),
+        ("RENDERS", tmp_path / "renders"),
+        ("CACHE", tmp_path / "cache"),
+        ("db", db),
+        ("jobs", Jobs(db, tmp_path / "renders", tmp_path / "cache")),
+    ]:
+        monkeypatch.setattr(m, name, value)
     with TestClient(m.app) as c:
         yield c
 
@@ -130,3 +141,114 @@ def test_delete_removes_the_row_and_the_file(client):
 def test_presets_are_listed(client):
     names = {p["name"] for p in client.get("/api/presets").json()}
     assert names == {"mp4", "webm", "gif", "mov"}
+
+
+# --- fonts -----------------------------------------------------------------
+
+
+def test_fonts_are_listed_with_ids(client):
+    fonts = client.get("/api/fonts").json()
+    assert fonts, "no fonts discovered"
+    assert {"id", "family", "style", "label", "path"} <= set(fonts[0])
+
+
+def test_a_font_file_can_be_fetched_by_id(client):
+    """The canvas needs the real face, or its text metrics are a guess."""
+    fid = client.get("/api/fonts").json()[0]["id"]
+    r = client.get(f"/api/fonts/{fid}/file")
+    assert r.status_code == 200
+    assert r.content[:4] in (b"\x00\x01\x00\x00", b"OTTO", b"true")   # sfnt magic
+
+
+def test_unknown_font_is_404(client):
+    assert client.get("/api/fonts/deadbeef/file").status_code == 404
+
+
+# --- renders ---------------------------------------------------------------
+
+
+def wait_for(client, rid, timeout=60):
+    import time
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        r = client.get(f"/api/renders/{rid}").json()
+        if r["status"] in ("done", "failed"):
+            return r
+        time.sleep(0.15)
+    raise AssertionError("render did not finish")
+
+
+def test_render_runs_and_produces_a_downloadable_file(client):
+    pid = upload(client).json()["id"]
+    rid = client.post(f"/api/projects/{pid}/renders",
+                      json={"preset": "mp4", "quality": 40}).json()["id"]
+    result = wait_for(client, rid)
+    assert result["status"] == "done", result["error"]
+
+    dl = client.get(f"/api/renders/{rid}/file")
+    assert dl.status_code == 200
+    assert len(dl.content) > 0
+    assert "clip.mp4" in dl.headers.get("content-disposition", "")
+
+
+def test_downloading_an_unfinished_render_is_409(client):
+    pid = upload(client).json()["id"]
+    rid = client.post(f"/api/projects/{pid}/renders", json={"preset": "mp4"}).json()["id"]
+    r = client.get(f"/api/renders/{rid}/file")
+    assert r.status_code in (409, 200)      # 200 only if it already finished
+
+
+def test_unknown_preset_is_rejected_before_queueing(client):
+    pid = upload(client).json()["id"]
+    r = client.post(f"/api/projects/{pid}/renders", json={"preset": "avi"})
+    assert r.status_code == 400
+
+
+def test_renders_are_listed_per_project(client):
+    pid = upload(client).json()["id"]
+    client.post(f"/api/projects/{pid}/renders", json={"preset": "mp4"})
+    assert len(client.get(f"/api/projects/{pid}/renders").json()) == 1
+
+
+# --- live preview ----------------------------------------------------------
+
+
+def overlay_doc(doc, **over):
+    doc = {**doc}
+    doc["overlays"] = [{
+        "id": "o1", "type": "text", "text": "hello", "x": 0.5, "y": 0.5,
+        "anchor": "middle-center", "size": 0.05,
+        "font": "/usr/share/fonts/TTF/DejaVuSans-Bold.ttf",
+        "color": "#ffffff", "box": None, "line_gap": 0.35,
+        "start": None, "end": None, **over,
+    }]
+    return doc
+
+
+def test_live_frame_uses_the_posted_document_not_the_saved_one(client):
+    """The editor previews unsaved state, so autosave cannot race the preview."""
+    p = upload(client).json()
+    saved = client.get(f"/api/projects/{p['id']}").json()["doc"]
+    assert saved["overlays"] == []
+
+    r = client.post(f"/api/projects/{p['id']}/frame",
+                    json={"t": 0.5, "doc": overlay_doc(p["doc"])})
+    assert r.status_code == 200
+    assert r.content[:2] == b"\xff\xd8"
+    # The document was never saved: previewing must not persist it.
+    assert client.get(f"/api/projects/{p['id']}").json()["doc"]["overlays"] == []
+
+
+def test_live_frame_rejects_an_invalid_document(client):
+    p = upload(client).json()
+    doc = overlay_doc(p["doc"], anchor="middle")        # not a real anchor
+    r = client.post(f"/api/projects/{p['id']}/frame", json={"t": 0, "doc": doc})
+    assert r.status_code == 400
+
+
+def test_live_frame_renders_hostile_text(client):
+    """The escaping path, exercised through the API the editor actually uses."""
+    p = upload(client).json()
+    doc = overlay_doc(p["doc"], text="O'Brien: 100%\nCS & E")
+    r = client.post(f"/api/projects/{p['id']}/frame", json={"t": 0, "doc": doc})
+    assert r.status_code == 200, r.text

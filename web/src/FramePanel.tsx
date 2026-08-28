@@ -1,3 +1,5 @@
+import { useState } from 'react'
+import { api } from './api'
 import { cropSize } from './CropBox'
 import type { Crop, EditDoc, Output } from './types'
 
@@ -39,15 +41,37 @@ export function outputForCrop(doc: EditDoc, height?: number): Output {
 }
 
 export function FramePanel({
-  doc, aspect, onAspect, onCrop, onOutput, onReset,
+  doc, projectId, aspect, onAspect, onCrop, onOutput, onReset,
 }: {
   doc: EditDoc
+  projectId: string
   aspect: number | null
   onAspect: (a: number | null) => void
   onCrop: (crop: Crop, tag?: string) => void
   onOutput: (output: Output) => void
   onReset: () => void
 }) {
+  const [finding, setFinding] = useState(false)
+  const [found, setFound] = useState<string | null>(null)
+
+  async function detect() {
+    setFinding(true)
+    setFound(null)
+    try {
+      const s = await api.suggestCrop(projectId)
+      setFound(s.reason)
+      // Only applied when something was actually found: replacing a crop with
+      // the whole frame because the analysis came up empty would undo work.
+      if (s.found) {
+        onAspect(null)
+        onCrop(s.crop)
+      }
+    } catch (e) {
+      setFound((e as Error).message)
+    } finally {
+      setFinding(false)
+    }
+  }
   const [cw, ch] = cropSize(doc.crop, doc.source)
   const cropped = doc.crop.w < 1 || doc.crop.h < 1
   const out = doc.output
@@ -88,6 +112,18 @@ export function FramePanel({
           ))}
         </div>
         <p className="note">Drag the rectangle on the picture to choose the area.</p>
+      </div>
+
+      <div className="field">
+        <span className="label">Find it for me</span>
+        <button className="wide" onClick={detect} disabled={finding}>
+          {finding ? 'Looking\u2026' : 'Detect content'}
+        </button>
+        <p className="note">
+          {found ?? 'Compares moments across the recording and proposes a crop '
+                  + 'around whatever moves, which in a screen capture is usually '
+                  + 'the part worth keeping.'}
+        </p>
       </div>
 
       <div className="field">

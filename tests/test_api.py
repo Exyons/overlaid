@@ -252,3 +252,32 @@ def test_live_frame_renders_hostile_text(client):
     doc = overlay_doc(p["doc"], text="O'Brien: 100%\nCS & E")
     r = client.post(f"/api/projects/{p['id']}/frame", json={"t": 0, "doc": doc})
     assert r.status_code == 200, r.text
+
+
+# --- analysis ---------------------------------------------------------------
+
+
+def test_crop_suggestion_returns_a_proposal(client):
+    p = upload(client).json()
+    r = client.post(f"/api/projects/{p['id']}/suggest/crop")
+    assert r.status_code == 200
+    body = r.json()
+    assert {"crop", "found", "reason", "coverage"} <= set(body)
+    assert {"x", "y", "w", "h"} == set(body["crop"])
+
+
+def test_a_suggestion_never_saves_anything(client):
+    """A proposal the user has not accepted must not become the document."""
+    p = upload(client).json()
+    before = client.get(f"/api/projects/{p['id']}").json()["doc"]["crop"]
+    client.post(f"/api/projects/{p['id']}/suggest/crop")
+    after = client.get(f"/api/projects/{p['id']}").json()["doc"]["crop"]
+    assert before == after
+
+
+def test_a_suggested_crop_is_always_renderable(client):
+    """Whatever comes back has to survive validation, or accepting it breaks."""
+    p = upload(client).json()
+    body = client.post(f"/api/projects/{p['id']}/suggest/crop").json()
+    doc = {**p["doc"], "crop": body["crop"]}
+    assert client.put(f"/api/projects/{p['id']}/doc", json=doc).status_code == 200

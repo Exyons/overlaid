@@ -332,6 +332,7 @@ export function Viewer({ id, onBack }: { id: string; onBack: () => void }) {
           {tab === 'frame' && (
             <FramePanel
               doc={doc}
+              projectId={id}
               aspect={aspect}
               onAspect={setAspect}
               onCrop={(crop) => { setCrop(crop); invalidate() }}

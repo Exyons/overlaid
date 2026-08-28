@@ -80,3 +80,11 @@ export interface EncoderInfo {
   label: string
   kind: 'cpu' | 'gpu'
 }
+
+export interface CropSuggestion {
+  crop: Crop
+  /** False when the analysis found nothing worth cropping to. */
+  found: boolean
+  reason: string
+  coverage: number
+}

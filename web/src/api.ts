@@ -1,4 +1,6 @@
-import type { EditDoc, EncoderInfo, Preset, Project, Render } from './types'
+import type {
+  CropSuggestion, EditDoc, EncoderInfo, Preset, Project, Render,
+} from './types'
 
 async function json<T>(res: Response): Promise<T> {
   if (!res.ok) {
@@ -56,6 +58,10 @@ export const api = {
   presets: () => fetch('/api/presets').then(json<Preset[]>),
 
   encoders: () => fetch('/api/encoders').then(json<EncoderInfo[]>),
+
+  suggestCrop: (id: string) =>
+    fetch(`/api/projects/${id}/suggest/crop`, { method: 'POST' })
+      .then(json<CropSuggestion>),
 
   startRender: (id: string, preset: string, quality: number, accel: string) =>
     fetch(`/api/projects/${id}/renders`, {

@@ -269,3 +269,57 @@ def test_upscaling_does_not_inflate_the_ceiling_in_practice(src, tmp_path):
     plan = plan_render(doc, FIXTURE, out, tmp_path, quality=100, accel="cpu")
     i = plan.argv.index("-maxrate")
     assert int(plan.argv[i + 1]) <= int(source.bitrate * 1.31)
+
+
+# --- analysis ---------------------------------------------------------------
+
+
+def test_sampling_spans_the_whole_recording(src):
+    """Windows must be spread out: a region only counts as still if it is
+    unchanged between widely separated moments, not across half a second."""
+    from core.analyze import sample_frames
+    source, _ = src
+    frames = sample_frames(FIXTURE, source)
+    assert frames.ndim == 3
+    assert len(frames) >= 4
+    assert frames.shape[2] == 320
+
+
+def test_a_still_recording_reports_nothing_to_crop(tmp_path):
+    """Nothing moves, so there is no moving region to crop to. Saying so beats
+    returning a confident rectangle around noise."""
+    import subprocess
+    from core.analyze import suggest_crop
+    still = tmp_path / "still.mp4"
+    subprocess.run(
+        ["ffmpeg", "-y", "-v", "error", "-f", "lavfi",
+         "-i", "color=c=slateblue:s=640x360:d=3:r=15",
+         "-c:v", "libx264", "-crf", "20", "-pix_fmt", "yuv420p", str(still)],
+        check=True, capture_output=True)
+    source, _ = probe(still)
+    p = suggest_crop(still, source)
+    assert p.found is False
+    assert p.crop.is_identity
+
+
+def test_a_still_border_is_excluded(src, tmp_path):
+    """The case this exists for: moving content inside a static surround."""
+    import subprocess
+    from core.analyze import suggest_crop
+    framed = tmp_path / "framed.mp4"
+    # A moving pattern occupying the middle of an otherwise black frame.
+    subprocess.run(
+        ["ffmpeg", "-y", "-v", "error",
+         "-f", "lavfi", "-i", "color=c=black:s=640x360:d=3:r=15",
+         "-f", "lavfi", "-i", "testsrc2=s=320x180:d=3:r=15",
+         "-filter_complex", "[0:v][1:v]overlay=160:90",
+         "-c:v", "libx264", "-crf", "20", "-pix_fmt", "yuv420p", str(framed)],
+        check=True, capture_output=True)
+
+    source, _ = probe(framed)
+    p = suggest_crop(framed, source)
+    assert p.found, p.reason
+    # The moving quarter sits at 0.25..0.75 horizontally, 0.25..0.75 vertically.
+    assert p.crop.x < 0.32 and p.crop.x + p.crop.w > 0.68
+    assert p.crop.y < 0.32 and p.crop.y + p.crop.h > 0.68
+    assert p.crop.w < 0.75 and p.crop.h < 0.85

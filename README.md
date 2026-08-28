@@ -142,10 +142,32 @@ Measured on a 70s 1856x1116 60fps capture:
 Hardware is several times faster; libx264 spends longer and fits more picture
 into the same bitrate.
 
+## Finding the crop
+
+**Crop & size** has a *Detect content* button. Screen captures put a lot of
+still furniture -- tabs, a URL bar, a settings panel -- around the part worth
+keeping, and what moves is a good proxy for that without needing to recognise
+any of it. Frames are sampled from windows spread across the recording and the
+per-pixel variation over time is thresholded: the furniture scores near zero,
+the content does not.
+
+It proposes rather than applies, and says when it found nothing rather than
+returning a confident rectangle around noise. On the recording this was built
+against it lands within a few percent of a hand-made crop, and additionally
+keeps the app's own toolbar -- those readouts animate, so they are genuinely
+part of what moves.
+
+Sampling windows rather than the whole timeline is what makes it quick: an
+`fps` filter decodes every frame in the file to keep a few dozen, measuring
+8.4s on a three-minute capture against 1.7s for the same frames taken from
+eight half-second windows. Hardware decode is slower still, not faster --
+frames have to come back to system memory for the analysis either way.
+
 ## Layout
 
 ```
 core/
+  analyze.py    reads the footage and proposes edits (OpenCV)
   doc.py        the edit document: dataclasses, JSON, validation
   compile.py    EditDoc -> ffmpeg argv.  Pure: no subprocess, no I/O
   probe.py      ffprobe wrapper

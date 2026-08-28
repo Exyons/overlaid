@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import shutil
 import tempfile
-from dataclasses import replace
+from dataclasses import asdict, replace
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
@@ -19,7 +19,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from core import encoders, fonts
+from core import analyze, encoders, fonts
 from core.compile import PRESETS, plan_preview, quality_value, quality_word
 from core.doc import DocError, EditDoc, Output
 from core.probe import ProbeError, probe
@@ -269,6 +269,29 @@ def start_render(pid: str, preset: str = Body("mp4", embed=True),
     EditDoc.from_dict(project.doc).validate()      # fail now, not on the worker
     rid = jobs.submit(pid, preset, quality, accel)
     return _render_json(db.get_render(rid))
+
+
+@app.post("/api/projects/{pid}/suggest/crop")
+def suggest_crop(pid: str) -> dict[str, Any]:
+    """Propose a crop around whatever actually moves in the recording.
+
+    A proposal, not an edit: it is returned for the user to accept or adjust,
+    and nothing is saved here. Screen captures put a lot of still furniture
+    around the part worth keeping, and what moves is a good proxy for that
+    without needing to recognise any of it.
+    """
+    p = _project_or_404(pid)
+    doc = EditDoc.from_dict(p.doc)
+    try:
+        proposal = analyze.suggest_crop(p.src_path, doc.source)
+    except analyze.AnalysisError as e:
+        raise HTTPException(422, str(e)) from e
+    return {
+        "crop": asdict(proposal.crop),
+        "found": proposal.found,
+        "reason": proposal.reason,
+        "coverage": proposal.coverage,
+    }
 
 
 @app.get("/api/encoders")

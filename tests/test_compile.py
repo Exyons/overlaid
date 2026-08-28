@@ -159,9 +159,17 @@ def test_trim_seeks_before_input():
     assert argv[argv.index("-to") + 1] == "12.000"
 
 
-def test_preview_seek_is_relative_to_the_trimmed_clip():
+def test_preview_seek_is_absolute_source_time():
+    """The scrubber spans the whole source and counts from the file's start, so
+    a preview measured from the in-point would disagree with the playhead."""
     p = plan_preview(doc(trim=Trim(5.0)), Path("i"), Path("f.png"), WORK, t=2.0)
-    assert p.argv[p.argv.index("-ss") + 1] == "7.000"
+    assert p.argv[p.argv.index("-ss") + 1] == "2.000"
+
+
+def test_preview_outside_the_trim_still_renders_that_moment():
+    """Trimming decides what the export contains, not what can be looked at."""
+    p = plan_preview(doc(trim=Trim(10.0, 15.0)), Path("i"), Path("f.png"), WORK, t=3.0)
+    assert p.argv[p.argv.index("-ss") + 1] == "3.000"
 
 
 def test_preview_and_render_share_the_filter_chain():
@@ -268,7 +276,7 @@ def test_only_mp4_takes_an_encoder():
 def test_preview_never_seeks_past_the_last_frame():
     """Seeking to the exact end produced an empty file and a failed render."""
     d = doc()                                   # 70.65s at 60 fps
-    p = plan_preview(d, Path("i"), Path("f.jpg"), WORK, t=d.duration)
+    p = plan_preview(d, Path("i"), Path("f.jpg"), WORK, t=d.source.duration)
     # Compare the formatted string, since that is what ffmpeg is handed:
     # rounding to milliseconds is what made a one-frame clamp overshoot.
     printed = float(p.argv[p.argv.index("-ss") + 1])

@@ -346,7 +346,13 @@ def _plan_gif(doc: EditDoc, src: Path, dst: Path, chain: str,
 
 def plan_preview(doc: EditDoc, src: Path, dst: Path, workdir: Path,
                  t: float) -> Plan:
-    """A single frame at `t` seconds into the *trimmed* clip.
+    """A single frame at `t` seconds into the *source*.
+
+    Absolute rather than relative to the trim: the editor's scrubber spans the
+    whole source and its timecode counts from the file's start, so a preview
+    that measured from the in-point would disagree with the position being
+    scrubbed. Trimming decides what the export contains, not what can be looked
+    at.
 
     Shares build_chain with plan_render, which is the whole point: this frame is
     proof of what the export will contain, not an approximation of it.
@@ -362,8 +368,8 @@ def plan_preview(doc: EditDoc, src: Path, dst: Path, workdir: Path,
     # frame can still be printed as a time later than the final frame's
     # timestamp -- 1.9666667 becomes "1.967" when the last frame is at 1.966667.
     frame = 1.0 / (doc.source.fps or 25)
-    last = max(0.0, doc.duration - frame * 1.5)
-    seek = doc.trim.start + min(max(0.0, t), last)
+    last = max(0.0, doc.source.duration - frame * 1.5)
+    seek = min(max(0.0, t), last)
     argv = [
         "ffmpeg", "-y", "-hide_banner", "-nostdin",
         "-ss", f"{seek:.3f}", "-i", str(src),

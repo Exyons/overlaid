@@ -137,6 +137,16 @@ export function CropBox({
       onPointerUp={endDrag}
       onPointerCancel={endDrag}
     >
+      {/* The dimming is a single huge shadow on its own element, clipped to the
+          picture. Putting it on the rectangle itself let it spill across the
+          whole page, and clipping the rectangle would have cut its handles. */}
+      <div className="crop-clip" aria-hidden="true">
+        <div
+          className="crop-shade"
+          style={{ left: pct(crop.x), top: pct(crop.y), width: pct(crop.w), height: pct(crop.h) }}
+        />
+      </div>
+
       <div
         className="crop-rect"
         style={{ left: pct(crop.x), top: pct(crop.y), width: pct(crop.w), height: pct(crop.h) }}

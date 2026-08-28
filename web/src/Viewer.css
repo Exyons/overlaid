@@ -43,12 +43,26 @@
    so it is the one that asks for attention. */
 .gate.verified { background: #2f5153; }
 .gate.approx   { background: var(--approx); }
-.gate video, .gate img {
+.gate img {
   position: absolute; inset: 2px;
   display: block;
   width: calc(100% - 4px); height: calc(100% - 4px);
   object-fit: contain;
   background: #000;
+}
+
+/* The video element carries the whole source. Showing it raw while a crop is
+   set made the crop appear to vanish on every edit, so the window it is seen
+   through is scaled and offset to the cropped region instead. */
+.video-view {
+  position: absolute; inset: 2px;
+  overflow: hidden;
+  background: #000;
+}
+.video-view video {
+  position: absolute;
+  display: block;
+  object-fit: fill;
 }
 
 /* The proof readout: an instrument reports its own confidence. It sits with the
@@ -289,13 +303,18 @@
 
 .crop-layer { position: absolute; inset: 2px; touch-action: none; }
 
+/* The shade is clipped to the picture; the rectangle is not, so its handles
+   stay grabbable when the crop reaches an edge. */
+.crop-clip { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+.crop-shade {
+  position: absolute;
+  box-shadow: 0 0 0 9999px rgba(10, 11, 12, 0.62);
+}
+
 .crop-rect {
   position: absolute;
   cursor: move;
   outline: 1px solid var(--verified);
-  /* Everything outside the rectangle is dimmed by one enormous shadow, which
-     avoids maintaining four separate mask elements. */
-  box-shadow: 0 0 0 9999px rgba(10, 11, 12, 0.62);
 }
 .crop-rect .thirds {
   position: absolute; inset: 0; pointer-events: none;

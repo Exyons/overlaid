@@ -174,8 +174,9 @@ def test_every_fit_mode_renders_at_the_requested_size(src, tmp_path, fit):
     assert (probed.width, probed.height) == (480, 480)
 
 
-def test_preview_inside_a_trim_is_offset_from_the_clip_start(src, tmp_path):
-    """The playhead counts from the start of the trimmed clip, not the file."""
+def test_preview_uses_absolute_source_time(src, tmp_path):
+    """The playhead counts from the file's start, so a trimmed project can
+    still be scrubbed and previewed outside the range it will export."""
     source, _ = src
     doc = build(source, trim=Trim(1.0, 2.0))
     out = tmp_path / "tp.png"
@@ -187,7 +188,7 @@ def test_preview_at_the_end_of_a_trimmed_clip_succeeds(src, tmp_path):
     source, _ = src
     doc = build(source, trim=Trim(0.5, 1.2))
     out = tmp_path / "te.png"
-    run(plan_preview(doc, FIXTURE, out, tmp_path, t=doc.duration), total=0)
+    run(plan_preview(doc, FIXTURE, out, tmp_path, t=source.duration), total=0)
     assert out.exists() and out.stat().st_size > 0
 
 

@@ -76,7 +76,7 @@ export function Viewer({ id, onBack }: { id: string; onBack: () => void }) {
           output: { ...current.output, width: current.source.width,
                     height: current.source.height, fit: 'letterbox' } }
       : current
-    api.liveFrame(id, Math.max(0, at - current.trim.start), asked, ctrl.signal)
+    api.liveFrame(id, Math.max(0, at), asked, ctrl.signal)
       .then((url) => {
         setProof((old) => { if (old) URL.revokeObjectURL(old); return url })
       })
@@ -176,6 +176,21 @@ export function Viewer({ id, onBack }: { id: string; onBack: () => void }) {
   const verified = proof !== null && !dragging && !playing && !cropping
   const selected = doc.overlays.find((o) => o.id === edit.selected) ?? null
 
+  /* The video element holds the whole source, so it is scaled up and offset
+     until only the cropped region shows through its window. Without this the
+     uncropped picture reappeared underneath every time the rendered frame was
+     invalidated, which read as the crop being lost. The crop tool wants the
+     whole source, so it opts out. */
+  const c = doc.crop
+  const videoWindow: React.CSSProperties = cropping
+    ? { inset: 0, width: '100%', height: '100%' }
+    : {
+        width: `${100 / c.w}%`,
+        height: `${100 / c.h}%`,
+        left: `${(-c.x * 100) / c.w}%`,
+        top: `${(-c.y * 100) / c.h}%`,
+      }
+
   return (
     <div className="viewer">
       <header className="bar">
@@ -203,18 +218,21 @@ export function Viewer({ id, onBack }: { id: string; onBack: () => void }) {
               ? `${source.width} / ${source.height}`
               : `${out.width} / ${out.height}` } as React.CSSProperties}
           >
-            <video
-              ref={video}
-              src={api.sourceUrl(id)}
-              preload="auto"
-              onLoadedMetadata={(e) => { e.currentTarget.currentTime = t }}
-              onPlay={() => setPlaying(true)}
-              onPause={() => { setPlaying(false); invalidate() }}
-              onTimeUpdate={(e) => {
-                if (playing) setT(e.currentTarget.currentTime)
-              }}
-              onEnded={() => setPlaying(false)}
-            />
+            <div className="video-view">
+              <video
+                ref={video}
+                src={api.sourceUrl(id)}
+                preload="auto"
+                style={videoWindow}
+                onLoadedMetadata={(e) => { e.currentTarget.currentTime = t }}
+                onPlay={() => setPlaying(true)}
+                onPause={() => { setPlaying(false); invalidate() }}
+                onTimeUpdate={(e) => {
+                  if (playing) setT(e.currentTarget.currentTime)
+                }}
+                onEnded={() => setPlaying(false)}
+              />
+            </div>
             {proof && !dragging && !playing && (
               <img src={proof} alt={`Rendered frame at ${timecode(t, fps)}`} />
             )}

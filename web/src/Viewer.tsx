@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from './api'
 import { Canvas } from './Canvas'
 import { Export } from './Export'
+import { PauseIcon, PlayIcon } from './Icons'
 import { useLoadedFonts } from './fonts'
 import { Inspector } from './Inspector'
 import { newOverlay, useEdit } from './store'
@@ -21,6 +22,7 @@ export function Viewer({ id, onBack }: { id: string; onBack: () => void }) {
   const [proof, setProof] = useState<string | null>(null)
   const [failed, setFailed] = useState<string | null>(null)
   const [dragging, setDragging] = useState(false)
+  const [playing, setPlaying] = useState(false)
   const video = useRef<HTMLVideoElement>(null)
   const timer = useRef<number | undefined>(undefined)
 
@@ -43,26 +45,38 @@ export function Viewer({ id, onBack }: { id: string; onBack: () => void }) {
      what the export will contain. */
   const inflight = useRef<AbortController | null>(null)
 
+  /* The document is read through a ref rather than closed over. A callback
+     capturing `doc` renders whichever version existed when it was created, so
+     an edit followed by an immediate preview would ask for the state before the
+     edit -- and the frame that came back would look like the change had been
+     undone. */
+  const docRef = useRef(doc)
+  docRef.current = doc
+
   const verify = useCallback((at: number) => {
-    if (!doc) return
+    const current = docRef.current
+    if (!current) return
     setFailed(null)
-    inflight.current?.abort()          // a newer position supersedes an older one
+    inflight.current?.abort()          // a newer request supersedes an older one
     const ctrl = new AbortController()
     inflight.current = ctrl
-    api.liveFrame(id, Math.max(0, at - doc.trim.start), doc, ctrl.signal)
+    api.liveFrame(id, Math.max(0, at - current.trim.start), current, ctrl.signal)
       .then((url) => {
         setProof((old) => { if (old) URL.revokeObjectURL(old); return url })
       })
       .catch((e) => {
         if (e.name !== 'AbortError') setFailed(e.message)
       })
-  }, [id, doc])
+  }, [id])
+
+  const tRef = useRef(t)
+  tRef.current = t
 
   const invalidate = useCallback(() => {
     setProof(null)
     window.clearTimeout(timer.current)
-    timer.current = window.setTimeout(() => verify(t), SETTLE_MS)
-  }, [verify, t])
+    timer.current = window.setTimeout(() => verify(tRef.current), SETTLE_MS)
+  }, [verify])
 
   const seek = useCallback((next: number) => {
     const clamped = Math.min(Math.max(0, next), dur)
@@ -72,6 +86,18 @@ export function Viewer({ id, onBack }: { id: string; onBack: () => void }) {
     window.clearTimeout(timer.current)
     timer.current = window.setTimeout(() => verify(clamped), SETTLE_MS)
   }, [dur, verify])
+
+  const togglePlay = useCallback(() => {
+    const el = video.current
+    if (!el) return
+    if (el.paused) {
+      setProof(null)          // playback shows the video, not a rendered frame
+      window.clearTimeout(timer.current)
+      void el.play()
+    } else {
+      el.pause()
+    }
+  }, [])
 
   useEffect(() => {
     if (doc) verify(0)
@@ -93,6 +119,7 @@ export function Viewer({ id, onBack }: { id: string; onBack: () => void }) {
         return
       }
       if (typing) return
+      if (e.key === ' ') { e.preventDefault(); togglePlay(); return }
       if (e.key === 'ArrowLeft') { e.preventDefault(); seek(t - (e.shiftKey ? step * 10 : step)) }
       if (e.key === 'ArrowRight') { e.preventDefault(); seek(t + (e.shiftKey ? step * 10 : step)) }
       if (e.key === 'Home') { e.preventDefault(); seek(0) }
@@ -106,13 +133,13 @@ export function Viewer({ id, onBack }: { id: string; onBack: () => void }) {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [seek, t, step, dur, edit, invalidate])
+  }, [seek, t, step, dur, edit, invalidate, togglePlay])
 
   if (failed && !project) return <p className="error" style={{ margin: 32 }}>{failed}</p>
   if (!project || !doc || !source) return null
 
   const out = doc.output
-  const verified = proof !== null && !dragging
+  const verified = proof !== null && !dragging && !playing
   const selected = doc.overlays.find((o) => o.id === edit.selected) ?? null
 
   return (
@@ -142,14 +169,19 @@ export function Viewer({ id, onBack }: { id: string; onBack: () => void }) {
               src={api.sourceUrl(id)}
               preload="auto"
               onLoadedMetadata={(e) => { e.currentTarget.currentTime = t }}
+              onPlay={() => setPlaying(true)}
+              onPause={() => { setPlaying(false); invalidate() }}
+              onTimeUpdate={(e) => {
+                if (playing) setT(e.currentTarget.currentTime)
+              }}
+              onEnded={() => setPlaying(false)}
             />
-            {proof && !dragging && (
+            {proof && !dragging && !playing && (
               <img src={proof} alt={`Rendered frame at ${timecode(t, fps)}`} />
             )}
             <Canvas
               doc={doc}
               families={families}
-              selected={edit.selected}
               showText={!verified}
               onSelect={edit.select}
               onMove={(oid, x, y) => edit.patchOverlay(oid, { x, y }, 'drag')}
@@ -170,6 +202,7 @@ export function Viewer({ id, onBack }: { id: string; onBack: () => void }) {
           </div>
           <Inspector
             overlay={selected}
+            outputWidth={out.width}
             outputHeight={out.height}
             onPatch={(patch, tag) => {
               if (edit.selected) {
@@ -200,13 +233,22 @@ export function Viewer({ id, onBack }: { id: string; onBack: () => void }) {
           />
         </div>
         <div className="row">
+          <button
+            className="play"
+            onClick={togglePlay}
+            aria-label={playing ? 'Pause' : 'Play'}
+            aria-pressed={playing}
+            title={playing ? 'Pause (Space)' : 'Play (Space)'}
+          >
+            {playing ? <PauseIcon /> : <PlayIcon />}
+          </button>
           <span className="tc-big">{timecode(t, fps)}</span>
           <span className="of">/ {timecode(dur, fps)}</span>
           <span className="frame-no">frame {Math.round(t * fps).toLocaleString()}</span>
           <span className="grow" />
           <span className="hint">
+            <kbd>Space</kbd> play &nbsp;&middot;&nbsp;
             <kbd className="arrow">&larr;</kbd> <kbd className="arrow">&rarr;</kbd> step a frame
-            &nbsp;&middot;&nbsp; <kbd>Shift</kbd> for ten
           </span>
           <div className={`proof ${verified ? 'verified' : 'approx'}`}>
             <span className="lamp" />

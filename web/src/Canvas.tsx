@@ -7,11 +7,10 @@ import type { EditDoc, TextOverlay } from './types'
  *  Nothing here converts between screen pixels and video pixels except the two
  *  functions that read pointer events. */
 export function Canvas({
-  doc, families, selected, showText, onSelect, onMove, onCommit, dragging, onDragChange,
+  doc, families, showText, onSelect, onMove, onCommit, dragging, onDragChange,
 }: {
   doc: EditDoc
   families: Record<string, string>
-  selected: string | null
   /** False once a real rendered frame is on screen: that frame already contains
    *  the text, so drawing it again here would paint every overlay twice. */
   showText: boolean
@@ -41,23 +40,16 @@ export function Canvas({
     if (!el || !ctx) return
 
     ctx.clearRect(0, 0, el.width, el.height)
+    if (!showText) return
     for (const o of doc.overlays) {
-      const family = families[o.font] ?? 'sans-serif'
-      const l = measure(o, doc, ctx, family)
-      if (showText) draw(ctx, o, l, family)
-
-      if (o.id === selected) {
-        // Scale the marquee with the canvas so it stays one screen pixel wide
-        // whatever the output resolution.
-        const unit = doc.output.width / (el.clientWidth || doc.output.width)
-        ctx.strokeStyle = '#57d2d2'
-        ctx.lineWidth = Math.max(1, unit)
-        ctx.setLineDash([6 * unit, 4 * unit])
-        ctx.strokeRect(l.boxX, l.boxY, l.boxW, l.boxH)
-        ctx.setLineDash([])
-      }
+      const family = families[o.font]
+      // Drawing with a substitute face would measure the text wrongly and put
+      // it in the wrong place, then shift it when the real font arrives. Better
+      // to show nothing for the moment it takes to load.
+      if (!family) continue
+      draw(ctx, o, measure(o, doc, ctx, family), family)
     }
-  }, [doc, families, selected, showText])
+  }, [doc, families, showText])
 
   function pick(px: number, py: number): TextOverlay | null {
     const ctx = canvas.current?.getContext('2d')
@@ -65,7 +57,8 @@ export function Canvas({
     // Topmost first: later overlays are drawn above earlier ones.
     for (let i = doc.overlays.length - 1; i >= 0; i--) {
       const o = doc.overlays[i]
-      if (hit(measure(o, doc, ctx, families[o.font] ?? 'sans-serif'), px, py)) return o
+      const family = families[o.font]
+      if (family && hit(measure(o, doc, ctx, family), px, py)) return o
     }
     return null
   }
@@ -77,7 +70,7 @@ export function Canvas({
     if (!found) return
 
     const ctx = canvas.current!.getContext('2d')!
-    const l = measure(found, doc, ctx, families[found.font] ?? 'sans-serif')
+    const l = measure(found, doc, ctx, families[found.font])
     grab.current = { id: found.id, dx: x - l.x, dy: y - l.y }
     onDragChange(true)
     e.currentTarget.setPointerCapture(e.pointerId)
@@ -90,7 +83,9 @@ export function Canvas({
     if (!o) return
 
     const ctx = canvas.current!.getContext('2d')!
-    const l = measure(o, doc, ctx, families[o.font] ?? 'sans-serif')
+    const family = families[o.font]
+    if (!family) return
+    const l = measure(o, doc, ctx, family)
     // The pointer moves the block; the stored value is the anchor point, so
     // convert back through the same anchor the renderer will apply.
     const [ax, ay] = anchorFrom(

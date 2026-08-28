@@ -58,11 +58,17 @@ whatever autosave last persisted, so the picture can never lag the controls.
 
 | Key | Does |
 |---|---|
+| `Space` | play / pause |
 | drag | move a text block |
 | Left / Right | step one frame; hold Shift for ten |
 | `Ctrl+Z` / `Ctrl+Shift+Z` | undo / redo |
 | `Delete` | remove the selected text |
 | `Esc` | deselect |
+
+The nine-cell control snaps text to a part of the frame and anchors it there, so
+the text grows inward and a longer line cannot push itself off the edge. Drag
+for anywhere else; the control then reads "custom" rather than claiming a corner
+the text is no longer in.
 
 ## Layout
 

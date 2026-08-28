@@ -92,3 +92,39 @@ function withAlpha(hex: string, alpha: number): string {
   const b = n & 255
   return `rgba(${r}, ${g}, ${b}, ${alpha})`
 }
+
+/** Standard gap from the frame edge, as a share of height. Matches the CLI. */
+export const MARGIN = 0.025
+
+/** Where an overlay must sit to land in one of the nine frame positions.
+ *
+ * The nine-cell control names a place in the frame, not merely an alignment:
+ * picking "top left" should put the text in the top-left corner. Anchoring it
+ * to the matching corner is what makes that stable, because the text then grows
+ * inward and a longer line cannot push itself off the edge.
+ *
+ * The plate's border grows outward from the text, so the margin absorbs it or
+ * the rectangle bleeds off the frame.
+ */
+export function positionFor(
+  anchor: Anchor, size: number, boxPad: number | null,
+  outWidth: number, outHeight: number,
+): { x: number; y: number } {
+  const padH = boxPad === null ? 0 : size * boxPad
+  const padW = padH * (outHeight / outWidth)
+  const [v, h] = anchor.split('-')
+  return {
+    x: h === 'left' ? MARGIN + padW : h === 'right' ? 1 - MARGIN - padW : 0.5,
+    y: v === 'top' ? MARGIN + padH : v === 'bottom' ? 1 - MARGIN - padH : 0.5,
+  }
+}
+
+/** True when the overlay is sitting exactly where `positionFor` would put it,
+ *  so the control can show "custom" after a drag rather than claiming a corner
+ *  the text is no longer in. */
+export function isAtPosition(
+  o: TextOverlay, outWidth: number, outHeight: number,
+): boolean {
+  const p = positionFor(o.anchor, o.size, o.box ? o.box.pad : null, outWidth, outHeight)
+  return Math.abs(p.x - o.x) < 0.002 && Math.abs(p.y - o.y) < 0.002
+}

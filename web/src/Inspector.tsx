@@ -1,4 +1,5 @@
 import { useFonts } from './fonts'
+import { isAtPosition, positionFor } from './layout'
 import type { Anchor, TextOverlay } from './types'
 
 const ANCHORS: Anchor[] = [
@@ -8,11 +9,12 @@ const ANCHORS: Anchor[] = [
 ]
 
 export function Inspector({
-  overlay, onPatch, onRemove, outputHeight,
+  overlay, onPatch, onRemove, outputWidth, outputHeight,
 }: {
   overlay: TextOverlay | null
   onPatch: (patch: Partial<TextOverlay>, tag?: string) => void
   onRemove: () => void
+  outputWidth: number
   outputHeight: number
 }) {
   const fonts = useFonts()
@@ -28,6 +30,8 @@ export function Inspector({
   }
 
   const o = overlay
+  const placed = isAtPosition(o, outputWidth, outputHeight)
+
   return (
     <aside className="inspector">
       <div className="field">
@@ -71,20 +75,29 @@ export function Inspector({
       </div>
 
       <div className="field">
-        <span className="label">Anchor</span>
-        <div className="anchor-grid" role="group" aria-label="Anchor">
-          {ANCHORS.map((a) => (
-            <button
-              key={a}
-              className={a === o.anchor ? 'on' : ''}
-              aria-label={a.replace('-', ' ')}
-              aria-pressed={a === o.anchor}
-              onClick={() => onPatch({ anchor: a })}
-            />
-          ))}
+        <span className="label">
+          Position {!placed && <span className="value">custom</span>}
+        </span>
+        <div className="anchor-grid" role="group" aria-label="Position">
+          {ANCHORS.map((a) => {
+            const on = placed && a === o.anchor
+            return (
+              <button
+                key={a}
+                className={on ? 'on' : ''}
+                aria-label={a.replace('-', ' ')}
+                aria-pressed={on}
+                onClick={() => onPatch({
+                  anchor: a,
+                  ...positionFor(a, o.size, o.box ? o.box.pad : null,
+                                 outputWidth, outputHeight),
+                })}
+              />
+            )
+          })}
         </div>
         <p className="note">
-          Text grows away from its anchor, so a longer line cannot run off frame.
+          Snaps the text to that part of the frame. Drag it for anywhere else.
         </p>
       </div>
 

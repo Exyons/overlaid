@@ -249,3 +249,11 @@
   .workspace { grid-template-columns: 1fr; grid-template-rows: 1fr auto; }
   .panel { border-left: none; border-top: 1px solid var(--line); max-height: 45vh; }
 }
+
+.transport .play {
+  display: grid; place-items: center;
+  width: 34px; height: 34px; padding: 0;
+  border-radius: 2px;
+  color: var(--ink);
+}
+.transport .play:hover:not(:disabled) { color: var(--verified); border-color: var(--verified); }

@@ -20,31 +20,48 @@ export interface Edit {
   canRedo: boolean
   select: (id: string | null) => void
   /** `tag` groups consecutive edits into one undo step (e.g. 'drag', 'size'). */
-  update: (next: EditDoc, tag?: string) => void
-  addOverlay: (o: TextOverlay) => void
   patchOverlay: (id: string, patch: Partial<TextOverlay>, tag?: string) => void
+  addOverlay: (o: TextOverlay) => void
   removeOverlay: (id: string) => void
   undo: () => void
   redo: () => void
 }
 
 export function useEdit(projectId: string): Edit {
-  const [doc, setDoc] = useState<EditDoc | null>(null)
+  const [doc, setDocState] = useState<EditDoc | null>(null)
   const [selected, setSelected] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [depth, setDepth] = useState({ past: 0, future: 0 })
 
+  /* The document is mirrored into a ref so edits can be computed outside a
+     setState updater. Updaters must stay pure -- React is free to run them more
+     than once, and saving or pushing history from inside one duplicates both. */
+  const current = useRef<EditDoc | null>(null)
   const past = useRef<EditDoc[]>([])
   const future = useRef<EditDoc[]>([])
   const lastTag = useRef<{ tag: string; at: number } | null>(null)
   const saveTimer = useRef<number | undefined>(undefined)
-  const [, bump] = useState(0)
+
+  const setDoc = useCallback((next: EditDoc) => {
+    current.current = next
+    setDocState(next)
+  }, [])
 
   useEffect(() => {
     api.getProject(projectId)
-      .then((p) => { setDoc(p.doc); past.current = []; future.current = [] })
+      .then((p) => {
+        past.current = []
+        future.current = []
+        lastTag.current = null
+        setDepth({ past: 0, future: 0 })
+        current.current = p.doc
+        setDocState(p.doc)
+      })
       .catch((e) => setError(e.message))
   }, [projectId])
+
+  useEffect(() => () => window.clearTimeout(saveTimer.current), [])
 
   const save = useCallback((next: EditDoc) => {
     window.clearTimeout(saveTimer.current)
@@ -57,111 +74,87 @@ export function useEdit(projectId: string): Edit {
     }, AUTOSAVE_MS)
   }, [projectId])
 
-  const update = useCallback((next: EditDoc, tag?: string) => {
-    setDoc((prev) => {
-      if (prev) {
-        const now = Date.now()
-        const same = tag && lastTag.current?.tag === tag
-          && now - lastTag.current.at < COALESCE_MS
-        if (!same) {
-          past.current = [...past.current, prev].slice(-LIMIT)
-          future.current = []
-        }
-        lastTag.current = tag ? { tag, at: now } : null
-      }
-      return next
-    })
+  /** Record the pre-edit document unless this edit continues the last one. */
+  const remember = useCallback((prev: EditDoc, tag?: string) => {
+    const now = Date.now()
+    const continues = tag
+      && lastTag.current?.tag === tag
+      && now - lastTag.current.at < COALESCE_MS
+    if (!continues) {
+      past.current = [...past.current, prev].slice(-LIMIT)
+      future.current = []
+    }
+    lastTag.current = tag ? { tag, at: now } : null
+    setDepth({ past: past.current.length, future: future.current.length })
+  }, [])
+
+  const commit = useCallback((next: EditDoc, tag?: string) => {
+    const prev = current.current
+    if (!prev) return
+    remember(prev, tag)
+    setDoc(next)
     save(next)
-    bump((n) => n + 1)
-  }, [save])
+  }, [remember, setDoc, save])
 
-  const patchOverlay = useCallback((id: string, patch: Partial<TextOverlay>, tag?: string) => {
-    setDoc((prev) => {
-      if (!prev) return prev
-      const now = Date.now()
-      const key = tag ? `${id}:${tag}` : undefined
-      const same = key && lastTag.current?.tag === key
-        && now - lastTag.current.at < COALESCE_MS
-      if (!same) {
-        past.current = [...past.current, prev].slice(-LIMIT)
-        future.current = []
-      }
-      lastTag.current = key ? { tag: key, at: now } : null
-
-      const next: EditDoc = {
+  const patchOverlay = useCallback(
+    (id: string, patch: Partial<TextOverlay>, tag?: string) => {
+      const prev = current.current
+      if (!prev) return
+      commit({
         ...prev,
         overlays: prev.overlays.map((o) => (o.id === id ? { ...o, ...patch } : o)),
-      }
-      save(next)
-      return next
-    })
-    bump((n) => n + 1)
-  }, [save])
+      }, tag ? `${id}:${tag}` : undefined)
+    }, [commit])
 
   const addOverlay = useCallback((o: TextOverlay) => {
-    setDoc((prev) => {
-      if (!prev) return prev
-      past.current = [...past.current, prev].slice(-LIMIT)
-      future.current = []
-      lastTag.current = null
-      const next = { ...prev, overlays: [...prev.overlays, o] }
-      save(next)
-      return next
-    })
+    const prev = current.current
+    if (!prev) return
+    commit({ ...prev, overlays: [...prev.overlays, o] })
     setSelected(o.id)
-    bump((n) => n + 1)
-  }, [save])
+  }, [commit])
 
   const removeOverlay = useCallback((id: string) => {
-    setDoc((prev) => {
-      if (!prev) return prev
-      past.current = [...past.current, prev].slice(-LIMIT)
-      future.current = []
-      lastTag.current = null
-      const next = { ...prev, overlays: prev.overlays.filter((o) => o.id !== id) }
-      save(next)
-      return next
-    })
+    const prev = current.current
+    if (!prev) return
+    commit({ ...prev, overlays: prev.overlays.filter((o) => o.id !== id) })
     setSelected((s) => (s === id ? null : s))
-    bump((n) => n + 1)
-  }, [save])
+  }, [commit])
 
   const undo = useCallback(() => {
-    setDoc((prev) => {
-      const previous = past.current.at(-1)
-      if (!prev || previous === undefined) return prev
-      past.current = past.current.slice(0, -1)
-      future.current = [prev, ...future.current].slice(0, LIMIT)
-      lastTag.current = null
-      save(previous)
-      return previous
-    })
-    bump((n) => n + 1)
-  }, [save])
+    const prev = current.current
+    const previous = past.current.at(-1)
+    if (!prev || previous === undefined) return
+    past.current = past.current.slice(0, -1)
+    future.current = [prev, ...future.current].slice(0, LIMIT)
+    lastTag.current = null
+    setDepth({ past: past.current.length, future: future.current.length })
+    setDoc(previous)
+    save(previous)
+  }, [setDoc, save])
 
   const redo = useCallback(() => {
-    setDoc((prev) => {
-      const next = future.current[0]
-      if (!prev || next === undefined) return prev
-      future.current = future.current.slice(1)
-      past.current = [...past.current, prev].slice(-LIMIT)
-      lastTag.current = null
-      save(next)
-      return next
-    })
-    bump((n) => n + 1)
-  }, [save])
+    const prev = current.current
+    const next = future.current[0]
+    if (!prev || next === undefined) return
+    future.current = future.current.slice(1)
+    past.current = [...past.current, prev].slice(-LIMIT)
+    lastTag.current = null
+    setDepth({ past: past.current.length, future: future.current.length })
+    setDoc(next)
+    save(next)
+  }, [setDoc, save])
 
   return {
     doc, selected, saving, error,
-    canUndo: past.current.length > 0,
-    canRedo: future.current.length > 0,
+    canUndo: depth.past > 0,
+    canRedo: depth.future > 0,
     select: setSelected,
-    update, addOverlay, patchOverlay, removeOverlay, undo, redo,
+    patchOverlay, addOverlay, removeOverlay, undo, redo,
   }
 }
 
 let counter = 0
+
 export function newOverlay(fontPath: string, text = 'Your Name'): TextOverlay {
   return {
     id: `o${Date.now().toString(36)}${counter++}`,

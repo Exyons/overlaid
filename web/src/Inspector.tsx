@@ -11,24 +11,13 @@ const ANCHORS: Anchor[] = [
 export function Inspector({
   overlay, onPatch, onRemove, outputWidth, outputHeight,
 }: {
-  overlay: TextOverlay | null
+  overlay: TextOverlay
   onPatch: (patch: Partial<TextOverlay>, tag?: string) => void
   onRemove: () => void
   outputWidth: number
   outputHeight: number
 }) {
   const fonts = useFonts()
-
-  if (!overlay) {
-    return (
-      <aside className="inspector">
-        <p className="nothing">
-          Select a text block to edit it, or add one to get started.
-        </p>
-      </aside>
-    )
-  }
-
   const o = overlay
   const placed = isAtPosition(o, outputWidth, outputHeight)
 

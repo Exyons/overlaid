@@ -2,12 +2,12 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from './api'
 import { Canvas } from './Canvas'
 import { CropBox } from './CropBox'
+import { EffectsPanel } from './EffectsPanel'
 import { Export } from './Export'
 import { FULL_FRAME, FramePanel, outputForCrop } from './FramePanel'
 import { TrimBar } from './TrimBar'
 import { PauseIcon, PlayIcon } from './Icons'
 import { useLoadedFonts } from './fonts'
-import { Inspector } from './Inspector'
 import { newOverlay, useEdit } from './store'
 import { timecode } from './timecode'
 import type { Crop, EditDoc, Output, Project, Trim } from './types'
@@ -30,7 +30,7 @@ export function Viewer({ id, onBack }: { id: string; onBack: () => void }) {
   const [failed, setFailed] = useState<string | null>(null)
   const [dragging, setDragging] = useState(false)
   const [playing, setPlaying] = useState(false)
-  const [tab, setTab] = useState<'text' | 'frame' | 'export'>('text')
+  const [tab, setTab] = useState<'effects' | 'frame' | 'export'>('effects')
   const [aspect, setAspect] = useState<number | null>(null)
   const video = useRef<HTMLVideoElement>(null)
   const timer = useRef<number | undefined>(undefined)
@@ -295,7 +295,7 @@ export function Viewer({ id, onBack }: { id: string; onBack: () => void }) {
 
         <div className="panel">
           <div className="tabs" role="tablist">
-            {(['text', 'frame', 'export'] as const).map((name) => (
+            {(['effects', 'frame', 'export'] as const).map((name) => (
               <button
                 key={name}
                 role="tab"
@@ -303,35 +303,30 @@ export function Viewer({ id, onBack }: { id: string; onBack: () => void }) {
                 className={tab === name ? 'on' : ''}
                 onClick={() => { setTab(name); invalidate() }}
               >
-                {name === 'frame' ? 'Crop & size' : name === 'text' ? 'Text' : 'Export'}
+                {name === 'frame' ? 'Crop & size' : name === 'effects' ? 'Effects' : 'Export'}
               </button>
             ))}
           </div>
 
-          {tab === 'text' && (
-            <>
-              <div className="panel-head">
-                <span className="label">Text</span>
-                <button onClick={() => {
-                  edit.addOverlay(newOverlay(selected?.font ?? FALLBACK_FONT))
+          {tab === 'effects' && (
+            <EffectsPanel
+              doc={doc}
+              selected={edit.selected}
+              onSelect={edit.select}
+              onAdd={() => {
+                edit.addOverlay(newOverlay(selected?.font ?? FALLBACK_FONT))
+                invalidate()
+              }}
+              onPatch={(patch, tag) => {
+                if (edit.selected) {
+                  edit.patchOverlay(edit.selected, patch, tag)
                   invalidate()
-                }}>Add text</button>
-              </div>
-              <Inspector
-                overlay={selected}
-                outputWidth={out.width}
-                outputHeight={out.height}
-                onPatch={(patch, tag) => {
-                  if (edit.selected) {
-                    edit.patchOverlay(edit.selected, patch, tag)
-                    invalidate()
-                  }
-                }}
-                onRemove={() => {
-                  if (edit.selected) { edit.removeOverlay(edit.selected); invalidate() }
-                }}
-              />
-            </>
+                }
+              }}
+              onRemove={() => {
+                if (edit.selected) { edit.removeOverlay(edit.selected); invalidate() }
+              }}
+            />
           )}
 
           {tab === 'frame' && (

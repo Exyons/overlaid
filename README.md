@@ -58,7 +58,10 @@ whatever autosave last persisted, so the picture can never lag the controls.
 
 ### Crop, trim, size
 
-The right-hand panel has three tabs. **Crop & size** opens the crop tool: the
+The right-hand panel has three tabs. **Effects** holds the text blocks, listed
+so one can be picked without hunting for it on the picture; it is a group of
+effects rather than a text panel, so further effects join it rather than
+displace it. **Crop & size** opens the crop tool: the
 picture switches to the whole uncropped frame with a rectangle over it, since
 choosing a crop means looking at the part you are about to throw away. Drag the
 rectangle or its handles; pick a shape (16:9, 1:1, 9:16 and so on) to constrain

@@ -93,6 +93,33 @@ mathematically lossless: CRF 0 reproduces the source's own compression
 artefacts exactly and measured 7.7x the size of a 12 Mb/s screen capture. The
 slider's floor stops where the picture is still worth looking at.
 
+A quality target alone does not bound a file, so the bitrate is also capped
+against the material: the source's own rate, scaled by how much of its picture
+survives. Cropping and downscaling lower the cap proportionally. Upscaling does
+not raise it -- more output pixels than the source holds cannot mean more
+detail, so they must not mean more bits. Two things had been exploiting the
+absence of a cap, measured on a 12.3 Mb/s screen capture:
+
+| | Bitrate |
+|---|---|
+| 3.5x upscale, libx264 | 20.4 Mb/s |
+| native size, libx264 | 8.6 Mb/s |
+| native size, NVENC | 19.4 Mb/s |
+| **the same three, capped** | **4.5-5.2 Mb/s** |
+
+Hardware encoders were the worse offender: given a quality target and no
+ceiling, NVENC produced 2.4x the size of libx264 at a matched setting. The
+output sizes offered never exceed what the crop actually contains, for the same
+reason.
+
+## Speed
+
+Speed sits with the trim controls, since both change how long the export runs.
+Speeding up resamples back to the source frame rate rather than leaving twice as
+many frames per second -- at 2x that would cost bitrate for motion nobody can
+see. Audio is retimed with `atempo`, chained into stages when the rate falls
+outside the 0.5-2 that one stage accepts.
+
 H.264 exports use hardware encoding when the machine has it. Encoders are found
 by probing -- a real one-frame encode -- rather than by reading
 `ffmpeg -encoders`, which lists what the binary supports rather than what the

@@ -6,7 +6,14 @@ export type Anchor =
   | 'middle-left' | 'middle-center' | 'middle-right'
   | 'bottom-left' | 'bottom-center' | 'bottom-right'
 
-export interface Source { width: number; height: number; fps: number; duration: number }
+export interface Source {
+  width: number
+  height: number
+  fps: number
+  duration: number
+  /** Bits per second of the source video, 0 if the container does not say. */
+  bitrate: number
+}
 export interface Trim { start: number; end: number | null }
 export interface Crop { x: number; y: number; w: number; h: number }
 export interface Output { width: number; height: number; fit: 'letterbox' | 'stretch' | 'cover' }
@@ -35,6 +42,8 @@ export interface EditDoc {
   trim: Trim
   crop: Crop
   overlays: TextOverlay[]
+  /** Playback rate. 2 plays twice as fast and halves the output duration. */
+  speed: number
 }
 
 export interface Project {

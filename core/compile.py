@@ -164,6 +164,12 @@ def build_chain(doc: EditDoc, workdir: Path) -> tuple[str, dict[Path, str]]:
     if (c := crop_filter(doc)) is not None:
         chain.append(c)
     chain += scale_filters(doc)
+    if doc.speed != 1.0:
+        # setpts alone would leave twice as many frames per second at 2x, which
+        # costs bitrate for motion nobody can see. Resampling back to the source
+        # rate drops the surplus instead.
+        chain.append(f"setpts=PTS/{doc.speed}")
+        chain.append(f"fps={doc.source.fps or 30:.4f}")
 
     textfiles: dict[Path, str] = {}
     for o in doc.overlays:
@@ -264,7 +270,67 @@ def quality_args(preset: Preset, quality: int,
     return ["-crf", str(value)]
 
 
+def bitrate_ceiling(doc: EditDoc, quality: int) -> int | None:
+    """An upper bound on the output bitrate, sized against the source.
+
+    A quality target alone does not bound the file. Two things exploited that.
+    Upscaling asks the encoder to spend bits on pixels carrying no new detail --
+    a 3.5x upscale measured 2.4x the size for no more picture. And the hardware
+    encoders' quality numbers are not the same scale as libx264's: NVENC at a
+    matched setting produced 2.4x the size, because it was given a quality
+    target and no ceiling at all.
+
+    So the ceiling is derived from the material: the source's own bitrate,
+    scaled by how much of its picture survives. Cropping and downscaling reduce
+    it proportionally; upscaling does not raise it, because the extra pixels are
+    invented. Quality moves it around parity, where 75 is roughly the source's
+    own rate.
+    """
+    if not doc.source.bitrate:
+        return None
+    src_px = doc.source.width * doc.source.height
+    if src_px <= 0:
+        return None
+    # Never above 1: more output pixels than the source has cannot mean more
+    # detail, so it must not mean more bits.
+    ratio = min(1.0, (doc.output.width * doc.output.height) / src_px)
+    factor = 0.15 + (max(0, min(100, quality)) / 100) * 1.15
+    return max(200_000, int(doc.source.bitrate * ratio * factor))
+
+
+def ceiling_args(ceiling: int | None) -> list[str]:
+    """Cap the bitrate without abandoning quality-targeted encoding.
+
+    The quality setting still decides how many bits the picture deserves; this
+    only stops it running away. bufsize is two seconds' worth, which lets a busy
+    passage borrow from a quiet one instead of being clipped frame by frame.
+    """
+    if ceiling is None:
+        return []
+    return ["-maxrate", str(ceiling), "-bufsize", str(ceiling * 2)]
+
+
 # --- entry points ----------------------------------------------------------
+
+
+def atempo_args(speed: float) -> list[str]:
+    """Match the audio to a speed change.
+
+    atempo only accepts 0.5 to 2 per instance, so anything beyond that is a
+    chain of stages whose product is the requested rate.
+    """
+    if speed == 1.0:
+        return []
+    stages: list[float] = []
+    remaining = speed
+    while remaining > 2.0:
+        stages.append(2.0)
+        remaining /= 2.0
+    while remaining < 0.5:
+        stages.append(0.5)
+        remaining /= 0.5
+    stages.append(remaining)
+    return ["-af", ",".join(f"atempo={s:.6g}" for s in stages)]
 
 
 def _trim_args(doc: EditDoc) -> list[str]:
@@ -308,13 +374,16 @@ def plan_render(doc: EditDoc, src: Path, dst: Path, workdir: Path,
         # filter that works on them.
         chain = ",".join(filter(None, [chain, encoder.filter_suffix]))
 
+    ceiling = bitrate_ceiling(doc, quality) if p.name in ("mp4", "webm") else None
+
     argv = [
         "ffmpeg", "-y", "-hide_banner", "-nostdin",
         *(encoder.pre_input if encoder else ()),
         *_trim_args(doc), "-i", str(src),
         "-vf", chain,
-        *p.video, *quality_args(p, quality, encoder),
+        *p.video, *quality_args(p, quality, encoder), *ceiling_args(ceiling),
         *(p.audio if has_audio else ["-an"]),
+        *(atempo_args(doc.speed) if has_audio else []),
         "-progress", "pipe:1", "-nostats",
         str(dst),
     ]

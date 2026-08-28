@@ -19,6 +19,10 @@ const SETTLE_MS = 220
 
 const FALLBACK_FONT = '/usr/share/fonts/TTF/DejaVuSans-Bold.ttf'
 
+/** Speed presets. Beyond these the audio needs several atempo stages and the
+ *  result stops being useful for anything but a time-lapse. */
+const SPEEDS = [0.5, 1, 1.5, 2, 4]
+
 export function Viewer({ id, onBack }: { id: string; onBack: () => void }) {
   const [project, setProject] = useState<Project | null>(null)
   const [t, setT] = useState(0)
@@ -169,10 +173,16 @@ export function Viewer({ id, onBack }: { id: string; onBack: () => void }) {
     if (d) edit.update({ ...d, output })
   }, [edit])
 
+  const setSpeed = useCallback((speed: number) => {
+    const d = docRef.current
+    if (d) edit.update({ ...d, speed })
+  }, [edit])
+
   if (failed && !project) return <p className="error" style={{ margin: 32 }}>{failed}</p>
   if (!project || !doc || !source) return null
 
   const out = doc.output
+  const clipLength = (doc.trim.end ?? dur) - doc.trim.start
   const verified = proof !== null && !dragging && !playing && !cropping
   const selected = doc.overlays.find((o) => o.id === edit.selected) ?? null
 
@@ -248,7 +258,8 @@ export function Viewer({ id, onBack }: { id: string; onBack: () => void }) {
                   // crop back into the frame it was cut out of. The height is
                   // kept, so this is a reshape rather than a rescale.
                   const d = docRef.current
-                  if (d) edit.update({ ...d, output: outputForCrop(d, d.output.height) })
+                  // No height argument: the crop's own size, never larger.
+                  if (d) edit.update({ ...d, output: outputForCrop(d) })
                   invalidate()
                 }}
               />
@@ -338,6 +349,27 @@ export function Viewer({ id, onBack }: { id: string; onBack: () => void }) {
           onTrim={setTrim}
           onCommit={invalidate}
         />
+        <div className="row">
+          <div className="speed" role="group" aria-label="Speed">
+            <span className="label">Speed</span>
+            {SPEEDS.map((s) => (
+              <button
+                key={s}
+                className={doc.speed === s ? 'on' : ''}
+                aria-pressed={doc.speed === s}
+                onClick={() => { setSpeed(s); invalidate() }}
+              >
+                {s}&times;
+              </button>
+            ))}
+            {doc.speed !== 1 && (
+              <span className="out-len mono">
+                {timecode(clipLength / doc.speed, fps)} out
+              </span>
+            )}
+          </div>
+        </div>
+
         <div className="row">
           <button
             className="play"

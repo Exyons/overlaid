@@ -36,6 +36,9 @@ class Source:
     height: int
     fps: float
     duration: float
+    #: Video bitrate in bits per second, 0 when the container does not say.
+    #: Used to size the export against the material rather than in the abstract.
+    bitrate: int = 0
 
 
 @dataclass(frozen=True)
@@ -136,10 +139,14 @@ class EditDoc:
     trim: Trim = field(default_factory=Trim)
     crop: Crop = field(default_factory=Crop)
     overlays: list[TextOverlay] = field(default_factory=list)
+    #: Playback rate. 2.0 plays twice as fast and halves the output duration.
+    speed: float = 1.0
     version: int = 1
 
     def validate(self) -> EditDoc:
         """Raise DocError on anything the compiler could not render. Returns self."""
+        if not 0.1 <= self.speed <= 10:
+            raise DocError("speed must be between 0.1x and 10x")
         self.output.validate()
         self.crop.validate()
         self.trim.validate(self.source.duration)
@@ -152,10 +159,15 @@ class EditDoc:
         return self
 
     @property
-    def duration(self) -> float:
-        """Output duration in seconds, after trimming."""
+    def clip_duration(self) -> float:
+        """Length of the kept range of the source, before any speed change."""
         end = self.trim.end if self.trim.end is not None else self.source.duration
         return max(0.0, min(end, self.source.duration) - self.trim.start)
+
+    @property
+    def duration(self) -> float:
+        """Output duration in seconds, after trimming and speed."""
+        return self.clip_duration / (self.speed or 1.0)
 
     # --- serialisation ----------------------------------------------------
 
@@ -181,6 +193,7 @@ class EditDoc:
             trim=Trim(**d.get("trim", {})),
             crop=Crop(**d.get("crop", {})),
             overlays=overlays,
+            speed=float(d.get("speed", 1.0)),
             version=version,
         )
 

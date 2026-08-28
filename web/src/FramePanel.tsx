@@ -13,7 +13,9 @@ export const ASPECTS: { label: string; value: number | null }[] = [
   { label: '9:16', value: 9 / 16 },
 ]
 
-/** Common output heights. Width follows from the aspect being produced. */
+/** Common output heights. Width follows from the aspect being produced.
+ *  Only those at or below what the crop actually contains are offered:
+ *  upscaling invents no detail but costs bitrate for the pixels it invents. */
 const HEIGHTS = [2160, 1440, 1080, 720, 480]
 
 const FITS: { value: Output['fit']; label: string; note: string }[] = [
@@ -24,10 +26,16 @@ const FITS: { value: Output['fit']; label: string; note: string }[] = [
 
 const even = (n: number) => Math.max(2, Math.round(n) & ~1)
 
-/** Output size that matches what the crop produces, at a chosen height. */
-export function outputForCrop(doc: EditDoc, height: number): Output {
+/** Output size that matches what the crop produces, at a chosen height.
+ *
+ *  Capped at the crop's own height. Asking for more pixels than the material
+ *  holds cannot add detail, and the encoder then spends real bitrate on the
+ *  invented ones -- a 3.5x upscale measured 2.4x the file size for no more
+ *  picture than the 1x version. */
+export function outputForCrop(doc: EditDoc, height?: number): Output {
   const [cw, ch] = cropSize(doc.crop, doc.source)
-  return { width: even((height * cw) / ch), height: even(height), fit: doc.output.fit }
+  const h = Math.min(height ?? ch, ch)
+  return { width: even((h * cw) / ch), height: even(h), fit: doc.output.fit }
 }
 
 export function FramePanel({
@@ -44,6 +52,10 @@ export function FramePanel({
   const cropped = doc.crop.w < 1 || doc.crop.h < 1
   const out = doc.output
   const sameShape = Math.abs(cw / ch - out.width / out.height) < 0.01
+  const upscaling = out.width * out.height > cw * ch * 1.02
+  // The crop's own height is always offered, plus every standard size below it.
+  const heights = [...new Set([ch, ...HEIGHTS.filter((h) => h < ch)])]
+    .sort((a, b) => b - a)
 
   function pickAspect(value: number | null) {
     onAspect(value)
@@ -93,16 +105,24 @@ export function FramePanel({
         </label>
         <select
           id="fr-height"
-          value={HEIGHTS.includes(out.height) ? out.height : ''}
+          value={heights.includes(out.height) ? out.height : ''}
           onChange={(e) => onOutput(outputForCrop(doc, Number(e.target.value)))}
         >
-          {!HEIGHTS.includes(out.height) && (
+          {!heights.includes(out.height) && (
             <option value="">{out.height}p (current)</option>
           )}
-          {HEIGHTS.map((h) => (
-            <option key={h} value={h}>{h}p</option>
+          {heights.map((h) => (
+            <option key={h} value={h}>
+              {h}p{h === ch ? ' — full detail' : ''}
+            </option>
           ))}
         </select>
+        {upscaling && (
+          <p className="note warn-note">
+            Larger than the {cw}&times;{ch} the crop contains, so the extra
+            pixels are invented and cost bitrate for no more picture.
+          </p>
+        )}
         {!sameShape && (
           <button
             className="wide"

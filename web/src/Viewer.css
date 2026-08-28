@@ -393,3 +393,17 @@
 }
 .trim-readout .kept-len { color: var(--approx); }
 .trim-readout button { padding: 3px 8px; font-size: 11px; }
+
+.transport .speed { display: flex; align-items: center; gap: 5px; }
+.transport .speed .label { margin-right: 3px; }
+.transport .speed button {
+  padding: 4px 9px; font-size: 12px;
+  color: var(--ink-dim);
+}
+.transport .speed button.on {
+  background: var(--verified); border-color: var(--verified);
+  color: #10201f; font-weight: 600;
+}
+.transport .speed .out-len { margin-left: 8px; font-size: 12px; color: var(--verified); }
+
+.warn-note { color: var(--approx) !important; }

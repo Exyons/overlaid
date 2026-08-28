@@ -4,6 +4,8 @@ from pathlib import Path
 
 import pytest
 
+from dataclasses import replace
+
 from core.compile import plan_preview, plan_render
 from core.doc import Crop, EditDoc, Output, Source, TextOverlay, Trim
 from core.probe import probe
@@ -200,3 +202,70 @@ def test_a_tall_crop_survives_a_wide_output(src, tmp_path):
     run(plan_render(doc, FIXTURE, out, tmp_path), total=doc.duration)
     probed, _ = probe(out)
     assert (probed.width, probed.height) == (1280, 720)
+
+
+# --- speed and size ---------------------------------------------------------
+
+
+@pytest.mark.parametrize("speed", [0.5, 2.0, 4.0])
+def test_speed_changes_the_output_duration(src, tmp_path, speed):
+    source, _ = src
+    doc = build(source, speed=speed)
+    out = tmp_path / f"sp{speed}.mp4"
+    run(plan_render(doc, FIXTURE, out, tmp_path), total=doc.duration)
+    probed, _ = probe(out)
+    assert probed.duration == pytest.approx(source.duration / speed, abs=0.25)
+
+
+def test_speeding_up_keeps_the_audio(src, tmp_path):
+    """Video sped up without matching the audio would drift apart."""
+    source, _ = src
+    doc = build(source, speed=2.0)
+    out = tmp_path / "spa.mp4"
+    run(plan_render(doc, FIXTURE, out, tmp_path), total=doc.duration)
+    assert probe(out)[1], "audio stream was dropped"
+
+
+def test_speed_does_not_multiply_the_frame_rate(src, tmp_path):
+    source, _ = src
+    doc = build(source, speed=2.0)
+    out = tmp_path / "spf.mp4"
+    run(plan_render(doc, FIXTURE, out, tmp_path), total=doc.duration)
+    assert probe(out)[0].fps <= source.fps + 1
+
+
+def test_speed_and_trim_compose(src, tmp_path):
+    source, _ = src
+    doc = build(source, trim=Trim(0.4, 1.4), speed=2.0)
+    out = tmp_path / "spt.mp4"
+    run(plan_render(doc, FIXTURE, out, tmp_path), total=doc.duration)
+    assert probe(out)[0].duration == pytest.approx(0.5, abs=0.2)
+
+
+def test_the_ceiling_actually_shrinks_the_file(src, tmp_path):
+    """The complaint that started this: exports several times the input size.
+
+    Compared against the same render with the ceiling disabled rather than
+    against an absolute rate. The fixture is two seconds long and bufsize is two
+    seconds' worth, so on a clip this short the buffer can absorb almost the
+    whole thing; the cap governs sustained rate, which only a longer clip shows.
+    """
+    source, _ = src
+    uncapped = replace(source, bitrate=0)          # no bitrate, no ceiling
+    a, b = tmp_path / "capped.mp4", tmp_path / "uncapped.mp4"
+
+    run(plan_render(build(source), FIXTURE, a, tmp_path, quality=100, accel="cpu"),
+        total=2.0)
+    run(plan_render(build(uncapped), FIXTURE, b, tmp_path, quality=100, accel="cpu"),
+        total=2.0)
+    assert a.stat().st_size < b.stat().st_size
+
+
+def test_upscaling_does_not_inflate_the_ceiling_in_practice(src, tmp_path):
+    """Asking for more pixels than the crop holds must not buy more bitrate."""
+    source, _ = src
+    doc = build(source, output=Output(source.width * 2, source.height * 2))
+    out = tmp_path / "up.mp4"
+    plan = plan_render(doc, FIXTURE, out, tmp_path, quality=100, accel="cpu")
+    i = plan.argv.index("-maxrate")
+    assert int(plan.argv[i + 1]) <= int(source.bitrate * 1.31)

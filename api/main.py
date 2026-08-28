@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import shutil
 import tempfile
+from dataclasses import replace
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
@@ -72,7 +73,29 @@ def _project_or_404(pid: str) -> Project:
     p = db.get_project(pid)
     if p is None:
         raise HTTPException(404, f"no project {pid}")
-    return p
+    return _backfill(p)
+
+
+def _backfill(p: Project) -> Project:
+    """Fill in source facts that a project predates.
+
+    Documents saved before the source bitrate was recorded have no value for it,
+    and the export ceiling is derived from that number -- so without this an old
+    project would keep exporting uncapped, which is the behaviour that made
+    files several times the size of their input. Re-probing is cheap and the
+    result is written back, so it happens once per project.
+    """
+    if p.doc.get("source", {}).get("bitrate"):
+        return p
+    if not p.src_path.exists():
+        return p
+    try:
+        source, _ = probe(p.src_path)
+    except ProbeError:
+        return p
+    doc = {**p.doc, "source": {**p.doc["source"], "bitrate": source.bitrate}}
+    db.update_doc(p.id, doc)
+    return replace(p, doc=doc)
 
 
 @app.exception_handler(DocError)
@@ -86,7 +109,7 @@ async def _doc_error(_, exc: DocError) -> JSONResponse:
 
 @app.get("/api/projects")
 def list_projects() -> list[dict[str, Any]]:
-    return [_json(p) for p in db.list_projects()]
+    return [_json(_backfill(p)) for p in db.list_projects()]
 
 
 @app.post("/api/projects", status_code=201)

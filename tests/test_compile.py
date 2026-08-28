@@ -5,8 +5,8 @@ from pathlib import Path
 import pytest
 
 from core.compile import (
-    PRESETS, anchor_expr, build_chain, fit_inside, plan_preview, plan_render,
-    quality_args, quality_value, quality_word,
+    PRESETS, anchor_expr, atempo_args, bitrate_ceiling, build_chain, fit_inside,
+    plan_preview, plan_render, quality_args, quality_value, quality_word,
 )
 from core.encoders import CPU
 from core.doc import Crop, DocError, EditDoc, Output, Source, TextOverlay, Trim
@@ -287,3 +287,91 @@ def test_preview_clamps_a_seek_beyond_the_clip():
     d = doc()
     p = plan_preview(d, Path("i"), Path("f.jpg"), WORK, t=9999)
     assert float(p.argv[p.argv.index("-ss") + 1]) < d.duration
+
+
+# --- bitrate ceiling --------------------------------------------------------
+
+
+def sized(bitrate: int = 12_000_000, **kw) -> EditDoc:
+    return doc(source=Source(2562, 1542, 60.0, 170.0, bitrate), **kw)
+
+
+def test_ceiling_scales_down_with_the_output():
+    """Fewer pixels than the source means proportionally fewer bits."""
+    big = bitrate_ceiling(sized(output=Output(2562, 1542)), 75)
+    small = bitrate_ceiling(sized(output=Output(1280, 770)), 75)
+    assert small < big / 3
+
+
+def test_upscaling_never_raises_the_ceiling():
+    """A 3.5x upscale measured 2.4x the file size for no more picture."""
+    native = bitrate_ceiling(sized(output=Output(2562, 1542)), 75)
+    upscaled = bitrate_ceiling(sized(output=Output(3678, 2160)), 75)
+    assert upscaled == native
+
+
+def test_ceiling_is_near_the_source_rate_at_default_quality():
+    at_source_size = bitrate_ceiling(sized(output=Output(2562, 1542)), 75)
+    assert 0.9 < at_source_size / 12_000_000 < 1.15
+
+
+def test_no_ceiling_when_the_source_bitrate_is_unknown():
+    assert bitrate_ceiling(sized(bitrate=0, output=Output(1280, 720)), 75) is None
+
+
+def test_render_caps_the_bitrate():
+    p = plan_render(sized(output=Output(1280, 770)), Path("i"), Path("o.mp4"),
+                    WORK, accel="cpu")
+    assert "-maxrate" in p.argv and "-bufsize" in p.argv
+
+
+def test_formats_without_a_rate_control_get_no_cap():
+    for preset in ("gif", "mov"):
+        p = plan_render(sized(), Path("i"), Path("o"), WORK, preset=preset)
+        assert "-maxrate" not in p.argv
+
+
+# --- speed ------------------------------------------------------------------
+
+
+def test_speed_rewrites_timestamps_and_resamples():
+    """setpts alone would double the frame rate at 2x, spending bitrate on
+    motion nobody asked for; the fps filter drops the surplus instead."""
+    chain, _ = build_chain(doc(speed=2.0), WORK)
+    assert "setpts=PTS/2.0" in chain
+    assert "fps=" in chain
+
+
+def test_speed_of_one_adds_no_filter():
+    chain, _ = build_chain(doc(speed=1.0), WORK)
+    assert "setpts" not in chain and "fps=" not in chain
+
+
+def test_speed_shortens_the_output_duration():
+    d = doc(trim=Trim(0.0, 60.0), speed=2.0)
+    assert d.clip_duration == 60.0
+    assert d.duration == 30.0
+
+
+@pytest.mark.parametrize("speed,stages", [
+    (2.0, 1), (4.0, 2), (0.5, 1), (0.25, 2), (3.0, 2), (1.5, 1),
+])
+def test_atempo_is_chained_within_its_legal_range(speed, stages):
+    args = atempo_args(speed)
+    parts = args[1].split(",")
+    assert len(parts) == stages
+    product = 1.0
+    for p in parts:
+        value = float(p.split("=")[1])
+        assert 0.5 <= value <= 2.0
+        product *= value
+    assert product == pytest.approx(speed)
+
+
+def test_no_audio_filter_at_normal_speed():
+    assert atempo_args(1.0) == []
+
+
+def test_an_impossible_speed_is_rejected():
+    with pytest.raises(DocError, match="speed"):
+        doc(speed=0).validate()

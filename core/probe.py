@@ -33,11 +33,17 @@ def probe(path: Path) -> tuple[Source, bool]:
     duration = float(data.get("format", {}).get("duration")
                      or video.get("duration") or 0.0)
 
+    # The video stream usually carries its own bitrate; when it does not, fall
+    # back to the container's, which includes audio and so reads a little high.
+    bitrate = int(float(video.get("bit_rate")
+                        or data.get("format", {}).get("bit_rate") or 0))
+
     return Source(
         width=int(video["width"]),
         height=int(video["height"]),
         fps=_fps(video.get("avg_frame_rate") or video.get("r_frame_rate")),
         duration=duration,
+        bitrate=bitrate,
     ), any(s.get("codec_type") == "audio" for s in streams)
 
 

@@ -113,8 +113,8 @@ def test_frame_endpoint_returns_a_jpeg(client):
     pid = upload(client).json()["id"]
     r = client.get(f"/api/projects/{pid}/frame", params={"t": 1.0})
     assert r.status_code == 200
-    assert r.headers["content-type"] == "image/jpeg"
-    assert r.content[:2] == b"\xff\xd8"           # JPEG magic
+    assert r.headers["content-type"] == "image/png"
+    assert r.content[:8] == b"\x89PNG\r\n\x1a\n"   # PNG magic
 
 
 def test_source_is_served_with_range_support(client):
@@ -234,7 +234,7 @@ def test_live_frame_uses_the_posted_document_not_the_saved_one(client):
     r = client.post(f"/api/projects/{p['id']}/frame",
                     json={"t": 0.5, "doc": overlay_doc(p["doc"])})
     assert r.status_code == 200
-    assert r.content[:2] == b"\xff\xd8"
+    assert r.content[:8] == b"\x89PNG\r\n\x1a\n"
     # The document was never saved: previewing must not persist it.
     assert client.get(f"/api/projects/{p['id']}").json()["doc"]["overlays"] == []
 

@@ -192,22 +192,29 @@ def get_source(pid: str) -> FileResponse:
     return FileResponse(p.src_path)
 
 
-def _render_frame(p: Project, doc: EditDoc, t: float, tag: str) -> FileResponse:
-    out = CACHE / f"{p.id}-{tag}.jpg"
-    plan = plan_preview(doc, p.src_path, out, CACHE / p.id, t=t)
+#: Library thumbnails do not need full resolution, and a full-size lossless
+#: frame per row would be several megabytes each.
+THUMBNAIL_WIDTH = 480
+
+
+def _render_frame(p: Project, doc: EditDoc, t: float, tag: str,
+                  thumbnail: bool = False) -> FileResponse:
+    out = CACHE / f"{p.id}-{tag}.png"
+    plan = plan_preview(doc, p.src_path, out, CACHE / p.id, t=t,
+                        thumbnail_width=THUMBNAIL_WIDTH if thumbnail else None)
     try:
         run(plan, total=0)
     except RenderError as e:
         raise HTTPException(500, f"preview failed: {e}") from e
-    return FileResponse(out, media_type="image/jpeg",
+    return FileResponse(out, media_type="image/png",
                         headers={"Cache-Control": "no-store"})
 
 
 @app.get("/api/projects/{pid}/frame")
 def get_frame(pid: str, t: float = Query(0, ge=0)) -> FileResponse:
-    """A real rendered frame from the project's saved document."""
+    """A real rendered frame from the project's saved document, for thumbnails."""
     p = _project_or_404(pid)
-    return _render_frame(p, EditDoc.from_dict(p.doc), t, f"{t:.3f}")
+    return _render_frame(p, EditDoc.from_dict(p.doc), t, f"{t:.3f}", thumbnail=True)
 
 
 @app.post("/api/projects/{pid}/frame")

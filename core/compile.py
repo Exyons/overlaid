@@ -414,8 +414,16 @@ def _plan_gif(doc: EditDoc, src: Path, dst: Path, chain: str,
 
 
 def plan_preview(doc: EditDoc, src: Path, dst: Path, workdir: Path,
-                 t: float) -> Plan:
+                 t: float, thumbnail_width: int | None = None) -> Plan:
     """A single frame at `t` seconds into the *source*.
+
+    Written as PNG rather than JPEG. A JPEG of video is re-encoded through
+    YCbCr, and a JPEG decoder assumes BT.601 full range whatever the file is
+    tagged with, while the source here is BT.709 limited range and the browser
+    decodes the video element as such. The preview and the video it replaces
+    therefore rendered in visibly different colours -- worst in green, which is
+    most of a terrain map -- and every edit flashed between them. RGB has no
+    matrix to disagree about.
 
     Absolute rather than relative to the trim: the editor's scrubber spans the
     whole source and its timecode counts from the file's start, so a preview
@@ -439,11 +447,15 @@ def plan_preview(doc: EditDoc, src: Path, dst: Path, workdir: Path,
     frame = 1.0 / (doc.source.fps or 25)
     last = max(0.0, doc.source.duration - frame * 1.5)
     seek = min(max(0.0, t), last)
+    if thumbnail_width:
+        chain = ",".join(filter(None, [
+            chain, f"scale='min({thumbnail_width},iw)':-2:flags=lanczos"]))
+
     argv = [
         "ffmpeg", "-y", "-hide_banner", "-nostdin",
         "-ss", f"{seek:.3f}", "-i", str(src),
         "-vf", chain,
-        "-frames:v", "1", "-q:v", "3",
+        "-frames:v", "1",
         str(dst),
     ]
     return Plan(argv=argv, textfiles=textfiles)

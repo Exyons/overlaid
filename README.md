@@ -194,6 +194,15 @@ is what lets the whole filter chain be tested as a string, and what will let the
 browser preview and the final export share one code path rather than two that
 drift.
 
+Preview frames are PNG, not JPEG. A JPEG decoder assumes BT.601 full range
+whatever the file says, while this footage is BT.709 limited range and the
+browser decodes the video element as such -- so the rendered frame and the
+video it replaced drew in visibly different colours, worst in green, and every
+edit flashed between them. Measured against a direct conversion, the mean
+per-pixel error went from 3.37 to 0.067 by dropping the YCbCr round trip. RGB
+has no matrix to disagree about. Library thumbnails are scaled down first,
+since a full-size lossless frame per row would be several megabytes each.
+
 `web/src/layout.ts` deliberately mirrors `drawtext_filter()` in
 `core/compile.py`. The canvas is sized to the output resolution and scaled down
 with CSS, so both work in the same coordinate space and a click lands on the

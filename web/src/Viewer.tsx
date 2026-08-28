@@ -107,6 +107,17 @@ export function Viewer({ id, onBack }: { id: string; onBack: () => void }) {
     timer.current = window.setTimeout(() => verify(clamped), SETTLE_MS)
   }, [dur, verify])
 
+  /* Speed is a property of the edit, so the preview has to play at it too --
+     otherwise the only way to hear or see what 4x looks like is to export it.
+     preservesPitch matches what atempo does to the audio on export, so the
+     preview sounds like the file will. */
+  useEffect(() => {
+    const el = video.current
+    if (!el || !doc) return
+    el.playbackRate = doc.speed
+    el.preservesPitch = true
+  }, [doc?.speed, doc])
+
   const togglePlay = useCallback(() => {
     const el = video.current
     if (!el) return
@@ -234,7 +245,11 @@ export function Viewer({ id, onBack }: { id: string; onBack: () => void }) {
                 src={api.sourceUrl(id)}
                 preload="auto"
                 style={videoWindow}
-                onLoadedMetadata={(e) => { e.currentTarget.currentTime = t }}
+                onLoadedMetadata={(e) => {
+                e.currentTarget.currentTime = t
+                e.currentTarget.playbackRate = doc.speed
+                e.currentTarget.preservesPitch = true
+              }}
                 onPlay={() => setPlaying(true)}
                 onPause={() => { setPlaying(false); invalidate() }}
                 onTimeUpdate={(e) => {

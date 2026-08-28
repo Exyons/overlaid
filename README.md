@@ -56,6 +56,21 @@ chain, so a frame marked rendered is what the export will contain.
 Preview requests carry the document the editor currently holds rather than
 whatever autosave last persisted, so the picture can never lag the controls.
 
+### Crop, trim, size
+
+The right-hand panel has three tabs. **Crop & size** opens the crop tool: the
+picture switches to the whole uncropped frame with a rectangle over it, since
+choosing a crop means looking at the part you are about to throw away. Drag the
+rectangle or its handles; pick a shape (16:9, 1:1, 9:16 and so on) to constrain
+it. Releasing the rectangle reshapes the output to match, because cropping
+changes the shape of the picture -- leaving the old size would letterbox the new
+crop back into the frame it was cut from. Output height and fit are next to it
+if you want something else.
+
+Trim handles sit on the scrubber. The bar always spans the whole source and the
+excluded parts are dimmed rather than removed: trimming is non-destructive, so
+the material outside the range still exists and stays reachable.
+
 | Key | Does |
 |---|---|
 | `Space` | play / pause |

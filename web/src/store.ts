@@ -19,7 +19,9 @@ export interface Edit {
   canUndo: boolean
   canRedo: boolean
   select: (id: string | null) => void
-  /** `tag` groups consecutive edits into one undo step (e.g. 'drag', 'size'). */
+  /** Replace the whole document -- crop, trim and output live outside overlays.
+   *  `tag` groups consecutive edits into one undo step (e.g. 'drag', 'size'). */
+  update: (next: EditDoc, tag?: string) => void
   patchOverlay: (id: string, patch: Partial<TextOverlay>, tag?: string) => void
   addOverlay: (o: TextOverlay) => void
   removeOverlay: (id: string) => void
@@ -149,6 +151,7 @@ export function useEdit(projectId: string): Edit {
     canUndo: depth.past > 0,
     canRedo: depth.future > 0,
     select: setSelected,
+    update: commit,
     patchOverlay, addOverlay, removeOverlay, undo, redo,
   }
 }

@@ -1,13 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from './api'
 import { Canvas } from './Canvas'
+import { CropBox } from './CropBox'
 import { Export } from './Export'
+import { FULL_FRAME, FramePanel, outputForCrop } from './FramePanel'
+import { TrimBar } from './TrimBar'
 import { PauseIcon, PlayIcon } from './Icons'
 import { useLoadedFonts } from './fonts'
 import { Inspector } from './Inspector'
 import { newOverlay, useEdit } from './store'
 import { timecode } from './timecode'
-import type { Project } from './types'
+import type { Crop, EditDoc, Output, Project, Trim } from './types'
 import './Viewer.css'
 
 /** How long the scrubber must be still before a real frame is fetched. Short
@@ -23,6 +26,8 @@ export function Viewer({ id, onBack }: { id: string; onBack: () => void }) {
   const [failed, setFailed] = useState<string | null>(null)
   const [dragging, setDragging] = useState(false)
   const [playing, setPlaying] = useState(false)
+  const [tab, setTab] = useState<'text' | 'frame' | 'export'>('text')
+  const [aspect, setAspect] = useState<number | null>(null)
   const video = useRef<HTMLVideoElement>(null)
   const timer = useRef<number | undefined>(undefined)
 
@@ -53,6 +58,12 @@ export function Viewer({ id, onBack }: { id: string; onBack: () => void }) {
   const docRef = useRef(doc)
   docRef.current = doc
 
+  /* Choosing a crop means looking at the part of the picture the crop would
+     throw away, so while the crop tool is open the frame is rendered from a
+     document with the crop lifted and the overlays dropped -- their positions
+     are relative to the output, which is exactly what is being changed. */
+  const cropModeRef = useRef(false)
+
   const verify = useCallback((at: number) => {
     const current = docRef.current
     if (!current) return
@@ -60,7 +71,12 @@ export function Viewer({ id, onBack }: { id: string; onBack: () => void }) {
     inflight.current?.abort()          // a newer request supersedes an older one
     const ctrl = new AbortController()
     inflight.current = ctrl
-    api.liveFrame(id, Math.max(0, at - current.trim.start), current, ctrl.signal)
+    const asked: EditDoc = cropModeRef.current
+      ? { ...current, crop: FULL_FRAME, overlays: [],
+          output: { ...current.output, width: current.source.width,
+                    height: current.source.height, fit: 'letterbox' } }
+      : current
+    api.liveFrame(id, Math.max(0, at - current.trim.start), asked, ctrl.signal)
       .then((url) => {
         setProof((old) => { if (old) URL.revokeObjectURL(old); return url })
       })
@@ -135,11 +151,29 @@ export function Viewer({ id, onBack }: { id: string; onBack: () => void }) {
     return () => window.removeEventListener('keydown', onKey)
   }, [seek, t, step, dur, edit, invalidate, togglePlay])
 
+  const cropping = tab === 'frame'
+  cropModeRef.current = cropping
+
+  const setCrop = useCallback((crop: Crop, tag: string | undefined = 'crop') => {
+    const d = docRef.current
+    if (d) edit.update({ ...d, crop }, tag)
+  }, [edit])
+
+  const setTrim = useCallback((trim: Trim) => {
+    const d = docRef.current
+    if (d) edit.update({ ...d, trim }, 'trim')
+  }, [edit])
+
+  const setOutput = useCallback((output: Output) => {
+    const d = docRef.current
+    if (d) edit.update({ ...d, output })
+  }, [edit])
+
   if (failed && !project) return <p className="error" style={{ margin: 32 }}>{failed}</p>
   if (!project || !doc || !source) return null
 
   const out = doc.output
-  const verified = proof !== null && !dragging && !playing
+  const verified = proof !== null && !dragging && !playing && !cropping
   const selected = doc.overlays.find((o) => o.id === edit.selected) ?? null
 
   return (
@@ -165,7 +199,9 @@ export function Viewer({ id, onBack }: { id: string; onBack: () => void }) {
         <div className="stage">
           <div
             className={`gate ${verified ? 'verified' : 'approx'}`}
-            style={{ '--ar': `${out.width} / ${out.height}` } as React.CSSProperties}
+            style={{ '--ar': cropping
+              ? `${source.width} / ${source.height}`
+              : `${out.width} / ${out.height}` } as React.CSSProperties}
           >
             <video
               ref={video}
@@ -182,59 +218,108 @@ export function Viewer({ id, onBack }: { id: string; onBack: () => void }) {
             {proof && !dragging && !playing && (
               <img src={proof} alt={`Rendered frame at ${timecode(t, fps)}`} />
             )}
-            <Canvas
-              doc={doc}
-              families={families}
-              showText={!verified}
-              onSelect={edit.select}
-              onMove={(oid, x, y) => edit.patchOverlay(oid, { x, y }, 'drag')}
-              onCommit={invalidate}
-              dragging={dragging}
-              onDragChange={setDragging}
-            />
+            {cropping ? (
+              <CropBox
+                crop={doc.crop}
+                source={source}
+                aspect={aspect}
+                onChange={setCrop}
+                onCommit={() => {
+                  // Cropping changes the shape of the picture, so the output
+                  // follows it. Leaving the old size would letterbox the new
+                  // crop back into the frame it was cut out of. The height is
+                  // kept, so this is a reshape rather than a rescale.
+                  const d = docRef.current
+                  if (d) edit.update({ ...d, output: outputForCrop(d, d.output.height) })
+                  invalidate()
+                }}
+              />
+            ) : (
+              <Canvas
+                doc={doc}
+                families={families}
+                showText={!verified}
+                onSelect={edit.select}
+                onMove={(oid, x, y) => edit.patchOverlay(oid, { x, y }, 'drag')}
+                onCommit={invalidate}
+                dragging={dragging}
+                onDragChange={setDragging}
+              />
+            )}
           </div>
         </div>
 
         <div className="panel">
-          <div className="panel-head">
-            <span className="label">Text</span>
-            <button onClick={() => {
-              edit.addOverlay(newOverlay(selected?.font ?? FALLBACK_FONT))
-              invalidate()
-            }}>Add text</button>
+          <div className="tabs" role="tablist">
+            {(['text', 'frame', 'export'] as const).map((name) => (
+              <button
+                key={name}
+                role="tab"
+                aria-selected={tab === name}
+                className={tab === name ? 'on' : ''}
+                onClick={() => { setTab(name); invalidate() }}
+              >
+                {name === 'frame' ? 'Crop & size' : name === 'text' ? 'Text' : 'Export'}
+              </button>
+            ))}
           </div>
-          <Inspector
-            overlay={selected}
-            outputWidth={out.width}
-            outputHeight={out.height}
-            onPatch={(patch, tag) => {
-              if (edit.selected) {
-                edit.patchOverlay(edit.selected, patch, tag)
+
+          {tab === 'text' && (
+            <>
+              <div className="panel-head">
+                <span className="label">Text</span>
+                <button onClick={() => {
+                  edit.addOverlay(newOverlay(selected?.font ?? FALLBACK_FONT))
+                  invalidate()
+                }}>Add text</button>
+              </div>
+              <Inspector
+                overlay={selected}
+                outputWidth={out.width}
+                outputHeight={out.height}
+                onPatch={(patch, tag) => {
+                  if (edit.selected) {
+                    edit.patchOverlay(edit.selected, patch, tag)
+                    invalidate()
+                  }
+                }}
+                onRemove={() => {
+                  if (edit.selected) { edit.removeOverlay(edit.selected); invalidate() }
+                }}
+              />
+            </>
+          )}
+
+          {tab === 'frame' && (
+            <FramePanel
+              doc={doc}
+              aspect={aspect}
+              onAspect={setAspect}
+              onCrop={(crop) => { setCrop(crop); invalidate() }}
+              onOutput={(output) => { setOutput(output); invalidate() }}
+              onReset={() => {
+                edit.update({ ...doc, crop: FULL_FRAME })
                 invalidate()
-              }
-            }}
-            onRemove={() => {
-              if (edit.selected) { edit.removeOverlay(edit.selected); invalidate() }
-            }}
-          />
-          <div className="panel-head">
-            <span className="label">Export</span>
-          </div>
-          <Export projectId={id} disabled={edit.saving} />
+              }}
+            />
+          )}
+
+          {tab === 'export' && <Export projectId={id} disabled={edit.saving} />}
         </div>
       </div>
 
       {(failed || edit.error) && <p className="failed">{failed ?? edit.error}</p>}
 
       <div className="transport">
-        <div className="scrub">
-          <span className="played" style={{ width: `${dur ? (t / dur) * 100 : 0}%` }} />
-          <input
-            type="range" min={0} max={dur || 0} step={step} value={t}
-            aria-label="Position"
-            onChange={(e) => seek(Number(e.target.value))}
-          />
-        </div>
+        <TrimBar
+          t={t}
+          duration={dur}
+          fps={fps}
+          trim={doc.trim}
+          onSeek={seek}
+          onTrim={setTrim}
+          onCommit={invalidate}
+        />
         <div className="row">
           <button
             className="play"

@@ -191,11 +191,15 @@ def test_render_runs_and_produces_a_downloadable_file(client):
     assert "clip.mp4" in dl.headers.get("content-disposition", "")
 
 
-def test_downloading_an_unfinished_render_is_409(client):
+def test_downloading_an_unfinished_render_is_409(client, monkeypatch):
+    """Asserted against a render that cannot finish, rather than racing a real
+    one: accepting 200 as well would have passed however the endpoint behaved."""
+    import api.main as m
+    monkeypatch.setattr(m.jobs, "submit", lambda *a, **k: m.db.create_render(a[0], "mp4").id)
     pid = upload(client).json()["id"]
     rid = client.post(f"/api/projects/{pid}/renders", json={"preset": "mp4"}).json()["id"]
-    r = client.get(f"/api/renders/{rid}/file")
-    assert r.status_code in (409, 200)      # 200 only if it already finished
+    assert client.get(f"/api/renders/{rid}").json()["status"] == "queued"
+    assert client.get(f"/api/renders/{rid}/file").status_code == 409
 
 
 def test_unknown_preset_is_rejected_before_queueing(client):
@@ -281,3 +285,40 @@ def test_a_suggested_crop_is_always_renderable(client):
     body = client.post(f"/api/projects/{p['id']}/suggest/crop").json()
     doc = {**p["doc"], "crop": body["crop"]}
     assert client.put(f"/api/projects/{p['id']}/doc", json=doc).status_code == 200
+
+
+# --- resource handling ------------------------------------------------------
+
+
+def test_uploading_does_not_leak_file_descriptors(client):
+    """mkstemp hands back an OS descriptor as well as a path; ignoring it leaked
+    one per upload, on the success path."""
+    import os
+    open_fds = lambda: len(os.listdir(f"/proc/{os.getpid()}/fd"))
+    upload(client)                      # warm up caches and connections
+    before = open_fds()
+    for i in range(5):
+        assert upload(client, f"u{i}.mp4").status_code == 201
+    assert open_fds() - before < 5
+
+
+def test_deleting_a_project_removes_its_cached_frames(client, tmp_path):
+    p = upload(client).json()
+    client.get(f"/api/projects/{p['id']}/frame", params={"t": 0.5})
+    cache = tmp_path / "cache"
+    assert any(f.name.startswith(p["id"]) for f in cache.iterdir())
+
+    assert client.delete(f"/api/projects/{p['id']}").status_code == 204
+    assert not any(f.name.startswith(p["id"]) for f in cache.iterdir())
+
+
+def test_render_columns_are_checked(client):
+    """The SET clause is built from caller-supplied names, which bound
+    parameters cannot protect."""
+    import pytest
+    from api.db import Db
+    import api.main as m
+    r = m.db.create_render(upload(client).json()["id"], "mp4")
+    m.db.update_render(r.id, status="done")            # allowed
+    with pytest.raises(ValueError, match="cannot update render columns"):
+        m.db.update_render(r.id, **{"status = 'x', progress": 1})

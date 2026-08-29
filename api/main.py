@@ -7,6 +7,7 @@ never produce a video the CLI could not.
 
 from __future__ import annotations
 
+import os
 import shutil
 import tempfile
 from dataclasses import asdict, replace
@@ -123,10 +124,17 @@ async def create_project(file: UploadFile) -> dict[str, Any]:
     UPLOADS.mkdir(parents=True, exist_ok=True)
     # Stream to a temp file first: a file that fails probing should never end up
     # in uploads/ with no project row pointing at it.
-    tmp = Path(tempfile.mkstemp(suffix=suffix, dir=UPLOADS)[1])
+    #
+    # mkstemp hands back an open descriptor as well as a path. Opening the path
+    # separately and letting the descriptor fall out of scope leaks it -- it is
+    # an OS handle, not a Python file object, so nothing closes it. That leaked
+    # one descriptor per upload, successful ones included. os.fdopen adopts it
+    # instead, and the with block closes it on every path out.
+    fd, name = tempfile.mkstemp(suffix=suffix, dir=UPLOADS)
+    tmp = Path(name)
     size = 0
     try:
-        with tmp.open("wb") as out:
+        with os.fdopen(fd, "wb") as out:
             while chunk := await file.read(1 << 20):
                 size += len(chunk)
                 if size > MAX_UPLOAD:
@@ -178,6 +186,18 @@ def delete_project(pid: str) -> None:
     _project_or_404(pid)
     for path in db.delete_project(pid):
         path.unlink(missing_ok=True)
+    _forget_cache(pid)
+
+
+def _forget_cache(pid: str) -> None:
+    """Drop the preview frames and sidecar files a project accumulated.
+
+    Previews are full-resolution PNGs, so leaving them behind meant a deleted
+    project kept costing disk indefinitely.
+    """
+    shutil.rmtree(CACHE / pid, ignore_errors=True)
+    for frame in CACHE.glob(f"{pid}-*.png"):
+        frame.unlink(missing_ok=True)
 
 
 # --- media -----------------------------------------------------------------

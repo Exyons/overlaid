@@ -323,3 +323,69 @@ def test_a_still_border_is_excluded(src, tmp_path):
     assert p.crop.x < 0.32 and p.crop.x + p.crop.w > 0.68
     assert p.crop.y < 0.32 and p.crop.y + p.crop.h > 0.68
     assert p.crop.w < 0.75 and p.crop.h < 0.85
+
+
+# --- process handling -------------------------------------------------------
+
+
+def test_a_noisy_failure_does_not_hang(tmp_path):
+    """A pipe holds about 64KB. Reading stderr only after the process exits
+    deadlocks once ffmpeg fills it: it blocks writing, stops producing stdout,
+    and this side waits for stdout that can never arrive. Renders run on one
+    worker, so a single such job would stop every export until restart."""
+    import sys
+    import threading
+    from core.run import RenderError, _exec
+
+    noisy = tmp_path / "noisy.py"
+    noisy.write_text(
+        "import sys\n"
+        "for i in range(3):\n"
+        "    print(f'out_time_us={i*1000000}', flush=True)\n"
+        "sys.stderr.write('boom\\n' * 80_000)\n"     # far beyond the pipe buffer
+        "sys.exit(1)\n")
+
+    outcome: dict[str, str] = {}
+
+    def run_it() -> None:
+        try:
+            _exec([sys.executable, str(noisy)], total=10.0, on_progress=lambda f: None)
+        except RenderError as e:
+            outcome["error"] = str(e)
+
+    thread = threading.Thread(target=run_it, daemon=True)
+    thread.start()
+    thread.join(timeout=20)
+    assert not thread.is_alive(), "ffmpeg's stderr deadlocked the reader"
+    assert "boom" in outcome.get("error", "")
+
+
+def test_the_error_message_stays_small(tmp_path):
+    """Only the tail is kept, so a run that logs megabytes costs nothing."""
+    import sys
+    from core.run import RenderError, _exec
+    noisy = tmp_path / "loud.py"
+    noisy.write_text("import sys\n"
+                     "sys.stderr.write('x' * 200 + '\\n')\n" * 1
+                     + "sys.stderr.write(('line\\n') * 50_000)\nsys.exit(2)\n")
+    try:
+        _exec([sys.executable, str(noisy)], total=0, on_progress=lambda f: None)
+    except RenderError as e:
+        assert len(str(e)) < 2000
+    else:
+        raise AssertionError("expected a RenderError")
+
+
+def test_progress_still_reported_when_stderr_is_busy(tmp_path):
+    import sys
+    from core.run import _exec
+    chatty = tmp_path / "chatty.py"
+    chatty.write_text(
+        "import sys\n"
+        "for i in range(5):\n"
+        "    print(f'out_time_us={i*1000000}', flush=True)\n"
+        "    sys.stderr.write('noise\\n' * 5000)\n"
+        "sys.exit(0)\n")
+    seen: list[float] = []
+    _exec([sys.executable, str(chatty)], total=10.0, on_progress=seen.append)
+    assert seen == sorted(seen) and len(seen) >= 4

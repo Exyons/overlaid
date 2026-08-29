@@ -63,17 +63,30 @@ export function useEdit(projectId: string): Edit {
       .catch((e) => setError(e.message))
   }, [projectId])
 
-  useEffect(() => () => window.clearTimeout(saveTimer.current), [])
+  /* The document waiting to be written, if the timer has not fired yet. */
+  const unsaved = useRef<EditDoc | null>(null)
 
   const save = useCallback((next: EditDoc) => {
+    unsaved.current = next
     window.clearTimeout(saveTimer.current)
     saveTimer.current = window.setTimeout(() => {
+      unsaved.current = null
       setSaving(true)
       api.saveDoc(projectId, next)
         .then(() => setError(null))
         .catch((e) => setError(e.message))
         .finally(() => setSaving(false))
     }, AUTOSAVE_MS)
+  }, [projectId])
+
+  /* Leaving flushes rather than cancels. Cancelling the timer on unmount --
+     which is what closing a project does -- silently discarded every edit made
+     in the last three quarters of a second, with no sign anything was lost. */
+  useEffect(() => () => {
+    window.clearTimeout(saveTimer.current)
+    const pending = unsaved.current
+    unsaved.current = null
+    if (pending) void api.saveDoc(projectId, pending).catch(() => {})
   }, [projectId])
 
   /** Record the pre-edit document unless this edit continues the last one. */

@@ -177,9 +177,19 @@ class Db:
             )
         return Render(rid, project_id, now, preset, "queued", 0.0, None, None)
 
+    #: Columns update_render may write. The SET clause is built from caller
+    #: supplied names, which parameters cannot protect -- only values are bound.
+    #: No user input reaches it today, but the check costs nothing and means a
+    #: future caller cannot turn a typo into arbitrary SQL.
+    RENDER_FIELDS = frozenset(
+        {"status", "progress", "out_path", "error", "encoder", "size"})
+
     def update_render(self, rid: str, **fields: Any) -> None:
         if not fields:
             return
+        unknown = set(fields) - self.RENDER_FIELDS
+        if unknown:
+            raise ValueError(f"cannot update render columns: {sorted(unknown)}")
         cols = ", ".join(f"{k} = ?" for k in fields)
         with self.conn() as c:
             c.execute(f"UPDATE renders SET {cols} WHERE id = ?",

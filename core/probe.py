@@ -9,17 +9,26 @@ from pathlib import Path
 from .doc import Source
 
 
+#: A local file should answer in well under this. The limit exists so a damaged
+#: or stalled file reports a failure instead of hanging the caller forever.
+PROBE_TIMEOUT = 30
+
+
 class ProbeError(RuntimeError):
     """The file could not be read as video."""
 
 
 def probe(path: Path) -> tuple[Source, bool]:
     """Return the video's parameters and whether it carries an audio stream."""
-    out = subprocess.run(
-        ["ffprobe", "-v", "error", "-show_streams", "-show_format",
-         "-of", "json", str(path)],
-        capture_output=True, text=True,
-    )
+    try:
+        out = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_streams", "-show_format",
+             "-of", "json", str(path)],
+            capture_output=True, text=True, timeout=PROBE_TIMEOUT,
+        )
+    except subprocess.TimeoutExpired as e:
+        raise ProbeError(f"ffprobe gave up on {path.name} "
+                         f"after {PROBE_TIMEOUT}s") from e
     if out.returncode != 0:
         raise ProbeError(out.stderr.strip() or f"ffprobe failed on {path}")
 

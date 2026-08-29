@@ -27,6 +27,13 @@ export function loadFont(font: FontInfo): Promise<string> {
         document.fonts.add(face)
         return family
       })
+      .catch((e) => {
+        // A failed load must not stay in the cache: the entry is what stops a
+        // second attempt, so a font that 404s once would never load again
+        // without a page reload.
+        loaded.delete(family)
+        throw e
+      })
     loaded.set(family, pending)
   }
   return pending

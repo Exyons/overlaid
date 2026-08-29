@@ -113,8 +113,14 @@ export function Library({ onOpen }: { onOpen: (id: string) => void }) {
             </span>
           </div>
         )}
-        <input ref={input} type="file" accept={ACCEPT}
-               onChange={(e) => accept(e.target.files)} />
+        <input
+          ref={input} type="file" accept={ACCEPT}
+          onChange={(e) => {
+            accept(e.target.files)
+            // Cleared so picking the same file again still fires a change.
+            e.target.value = ''
+          }}
+        />
       </div>
 
     </div>

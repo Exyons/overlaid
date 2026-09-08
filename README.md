@@ -1,14 +1,38 @@
-# overlaid
+<p align="center">
+  <img src="docs/logo.png" alt="Overlaid" width="300">
+</p>
 
-A local video editor that runs in the browser. Put text on a screen recording,
-crop it, trim it, change its speed, and export it.
+<p align="center">
+  A local video editor that runs in the browser.<br>
+  Text on a screen recording, cropped, trimmed, sped up, exported.
+</p>
 
-It was built for one job: tagging a project demo with a name, roll number and
-department before handing it in. It has since grown into something worth using
-for screen recordings generally.
+<p align="center">
+  <a href="https://github.com/Exyons/overlaid/releases"><img alt="release" src="https://img.shields.io/github/v/release/Exyons/overlaid?color=4c9a7a&label=release"></a>
+  <img alt="python" src="https://img.shields.io/badge/python-3.12%2B-3b7ea1">
+  <img alt="renderer" src="https://img.shields.io/badge/renderer-ffmpeg-777">
+</p>
+
+---
+
+Overlaid was built for one job: tagging a project demo with a name, roll number
+and department before handing it in. It has since grown into something worth
+using for screen recordings generally.
 
 Every preview you see is a real frame from the renderer, not an approximation of
 one. The picture tells you which you are looking at.
+
+## Contents
+
+- [Requirements](#requirements)
+- [Running it](#running-it)
+- [The editor](#the-editor)
+- [Previews you can trust](#previews-you-can-trust)
+- [Export](#export)
+- [Finding the crop](#finding-the-crop)
+- [Command line](#command-line)
+- [How it fits together](#how-it-fits-together)
+- [Tests](#tests)
 
 ## Requirements
 
@@ -135,7 +159,7 @@ Measured on a 70 second 1856x1116 60fps capture:
 Hardware is several times faster. libx264 spends longer and fits more picture
 into the same bitrate.
 
-## Finding the crop for you
+## Finding the crop
 
 Crop and size has a "Detect content" button. A screen capture surrounds the part
 worth keeping with things that never move: tabs, a URL bar, a settings panel.

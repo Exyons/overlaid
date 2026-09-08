@@ -1,0 +1,35 @@
+services:
+  overlaid:
+    # Build locally, or comment the build block and use the published image:
+    #   image: ghcr.io/exyons/overlaid:latest
+    build: .
+    image: ghcr.io/exyons/overlaid:latest
+    container_name: overlaid
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8787:8787"
+    volumes:
+      # Projects, renders and cached frames. Without this they vanish when the
+      # container is replaced.
+      - overlaid-data:/app/data
+    environment:
+      PORT: 8787
+
+    # Hardware encoding needs the render nodes passed through. Uncomment for
+    # Intel Quick Sync or AMD VAAPI. The encoder is chosen by probing, so
+    # without this the container finds nothing usable and encodes on the CPU
+    # rather than failing.
+    # devices:
+    #   - /dev/dri:/dev/dri
+
+    # NVENC additionally needs the NVIDIA container runtime:
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu, video]
+
+volumes:
+  overlaid-data:

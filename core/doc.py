@@ -11,11 +11,48 @@ resolution rescales the whole layout instead of breaking it.
 from __future__ import annotations
 
 import json
+import subprocess
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
-DEFAULT_FONT = "/usr/share/fonts/TTF/DejaVuSans-Bold.ttf"
+#: Where a bold sans face lives, by distribution. Arch keeps fonts in flat
+#: per-family directories, Debian and Ubuntu nest them under truetype/, and the
+#: container image may have only whatever the font package installed. Hardcoding
+#: one of these made every overlay fail validation on the others.
+_FONT_CANDIDATES = (
+    "/usr/share/fonts/TTF/DejaVuSans-Bold.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+    "/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf",
+    "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+    "/usr/share/fonts/liberation/LiberationSans-Bold.ttf",
+    "/usr/share/fonts/noto/NotoSans-Bold.ttf",
+    "/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf",
+)
+
+
+def _resolve_default_font() -> str:
+    """A bold sans face that exists on this machine.
+
+    fontconfig knows the answer wherever it is installed, so it is asked first
+    and the fixed list is only a fallback. An empty result is left to fail
+    validation with a message naming the missing file, which is more use than
+    an import that raises.
+    """
+    try:
+        out = subprocess.run(
+            ["fc-match", "-f", "%{file}", "DejaVu Sans:style=Bold"],
+            capture_output=True, text=True, timeout=10,
+        )
+        found = Path(out.stdout.strip())
+        if out.returncode == 0 and found.is_file():
+            return str(found)
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return next((p for p in _FONT_CANDIDATES if Path(p).is_file()), "")
+
+
+DEFAULT_FONT = _resolve_default_font()
 
 # An anchor names which point of the text block sits at (x, y). Right-anchored
 # text grows leftward, so a longer string can never run off the frame edge.

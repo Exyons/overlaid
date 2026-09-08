@@ -7,7 +7,7 @@ import { Export } from './Export'
 import { FULL_FRAME, FramePanel, outputForCrop } from './FramePanel'
 import { TrimBar } from './TrimBar'
 import { PauseIcon, PlayIcon } from './Icons'
-import { useLoadedFonts } from './fonts'
+import { useDefaultFont, useLoadedFonts } from './fonts'
 import { newOverlay, useEdit } from './store'
 import { timecode } from './timecode'
 import type { Crop, EditDoc, Output, Project, Trim } from './types'
@@ -16,8 +16,6 @@ import './Viewer.css'
 /** How long the scrubber must be still before a real frame is fetched. Short
  *  enough to feel immediate, long enough not to spawn ffmpeg per pixel. */
 const SETTLE_MS = 220
-
-const FALLBACK_FONT = '/usr/share/fonts/TTF/DejaVuSans-Bold.ttf'
 
 /** Speed presets. Beyond these the audio needs several atempo stages and the
  *  result stops being useful for anything but a time-lapse. */
@@ -38,6 +36,7 @@ export function Viewer({ id, onBack }: { id: string; onBack: () => void }) {
   const edit = useEdit(id)
   const doc = edit.doc
   const families = useLoadedFonts(doc?.overlays.map((o) => o.font) ?? [])
+  const defaultFont = useDefaultFont()
 
   useEffect(() => {
     api.getProject(id).then(setProject).catch((e) => setFailed(e.message))
@@ -314,7 +313,8 @@ export function Viewer({ id, onBack }: { id: string; onBack: () => void }) {
               selected={edit.selected}
               onSelect={edit.select}
               onAdd={() => {
-                edit.addOverlay(newOverlay(selected?.font ?? FALLBACK_FONT))
+                edit.addOverlay(
+                  newOverlay(selected?.font ?? defaultFont?.path ?? ''))
                 invalidate()
               }}
               onPatch={(patch, tag) => {

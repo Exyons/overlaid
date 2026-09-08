@@ -256,8 +256,10 @@ def post_frame(pid: str, t: float = Body(0), doc: dict[str, Any] = Body(...)) ->
 
 @app.get("/api/fonts")
 def list_fonts() -> list[dict[str, Any]]:
+    chosen = fonts.default()
     return [{"id": f.id, "family": f.family, "style": f.style,
-             "label": f.label, "path": str(f.path)}
+             "label": f.label, "path": str(f.path),
+             "default": chosen is not None and f.id == chosen.id}
             for f in fonts.available()]
 
 

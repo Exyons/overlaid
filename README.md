@@ -27,6 +27,7 @@ one. The picture tells you which you are looking at.
 
 - [Requirements](#requirements)
 - [Running it](#running-it)
+- [Docker](#docker)
 - [The editor](#the-editor)
 - [Previews you can trust](#previews-you-can-trust)
 - [Export](#export)
@@ -52,6 +53,44 @@ ffprobe. Everything runs on your machine. Nothing is uploaded anywhere.
 `/api` across. Set `PORT` to move the backend.
 
 Drop a video on the library page and open it.
+
+## Docker
+
+The published image carries ffmpeg, fontconfig and a set of fonts, so it renders
+text without anything installed on the host.
+
+```bash
+docker run -d --name overlaid \
+  -p 127.0.0.1:8787:8787 \
+  -v overlaid-data:/app/data \
+  ghcr.io/exyons/overlaid:latest
+```
+
+Or with compose, which is the same thing written down:
+
+```bash
+docker compose up -d
+```
+
+The volume matters. Projects, renders and cached frames all live in `/app/data`,
+and without it they go when the container is replaced.
+
+Port 8787 is bound to localhost in both. There is no authentication, so anything
+that can reach the port can read and delete every project. Put it behind
+something before exposing it beyond the machine it runs on.
+
+### Hardware encoding in a container
+
+The encoder is chosen by probing, so a container with no access to a graphics
+device finds nothing usable and encodes on the CPU rather than failing. To let
+it use Quick Sync or VAAPI, pass the render nodes through:
+
+```bash
+docker run -d --device /dev/dri:/dev/dri ...
+```
+
+NVENC additionally needs the NVIDIA container runtime. The compose file has both
+written out and commented, ready to uncomment.
 
 ## The editor
 

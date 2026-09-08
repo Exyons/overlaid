@@ -6,6 +6,9 @@ export interface FontInfo {
   style: string
   label: string
   path: string
+  /** The face a new overlay should use. Which file that is depends on the
+   *  distribution, so the server decides rather than the browser guessing. */
+  default: boolean
 }
 
 /** Faces already handed to the browser, so a font is fetched at most once. */
@@ -41,6 +44,12 @@ export function loadFont(font: FontInfo): Promise<string> {
 
 /** The font catalogue, fetched once per session rather than per component. */
 let catalogue: Promise<FontInfo[]> | null = null
+
+/** The font a new overlay should use, once the catalogue has arrived. */
+export function useDefaultFont(): FontInfo | null {
+  const fonts = useFonts()
+  return fonts.find((f) => f.default) ?? fonts[0] ?? null
+}
 
 export function useFonts(): FontInfo[] {
   const [fonts, setFonts] = useState<FontInfo[]>([])

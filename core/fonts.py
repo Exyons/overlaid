@@ -78,6 +78,12 @@ def by_id(fid: str) -> Font | None:
     return next((f for f in available() if f.id == fid), None)
 
 
+def default() -> Font | None:
+    """The face a new overlay should use, as an entry in the catalogue."""
+    from .doc import DEFAULT_FONT
+    return by_path(DEFAULT_FONT) or (available()[0] if available() else None)
+
+
 def by_path(path: str | Path) -> Font | None:
     target = Path(path)
     return next((f for f in available() if f.path == target), None)

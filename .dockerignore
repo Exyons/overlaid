@@ -1,0 +1,21 @@
+# Everything the build does not read. Keeping the context small matters most
+# for data/, which holds uploaded video and would otherwise be sent to the
+# daemon on every build.
+.git
+.gitignore
+data/
+docs/
+assets/
+tests/
+.venv
+web/node_modules
+web/dist
+**/__pycache__
+**/*.pyc
+.pytest_cache
+*.md
+!README.md
+run.sh
+docker-compose.yml
+Dockerfile
+.dockerignore

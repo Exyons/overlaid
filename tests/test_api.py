@@ -5,6 +5,8 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from core.doc import DEFAULT_FONT
+
 FIXTURE = Path(__file__).parent / "fixtures" / "2s.mp4"
 
 
@@ -83,7 +85,7 @@ def test_saving_a_document_persists_it(client):
     doc["overlays"] = [{
         "id": "o1", "type": "text", "text": "hello", "x": 0.5, "y": 0.5,
         "anchor": "bottom-right", "size": 0.03,
-        "font": "/usr/share/fonts/TTF/DejaVuSans-Bold.ttf",
+        "font": DEFAULT_FONT,
         "color": "#ffffff", "box": None, "line_gap": 0.35,
         "start": None, "end": None,
     }]
@@ -222,7 +224,7 @@ def overlay_doc(doc, **over):
     doc["overlays"] = [{
         "id": "o1", "type": "text", "text": "hello", "x": 0.5, "y": 0.5,
         "anchor": "middle-center", "size": 0.05,
-        "font": "/usr/share/fonts/TTF/DejaVuSans-Bold.ttf",
+        "font": DEFAULT_FONT,
         "color": "#ffffff", "box": None, "line_gap": 0.35,
         "start": None, "end": None, **over,
     }]

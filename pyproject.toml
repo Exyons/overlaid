@@ -3,6 +3,8 @@ name = "video-overlay"
 version = "0.1.0"
 description = "Burn name / roll no / department onto a video"
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [
     { name = "Exyons", email = "exyons007@gmail.com" }
 ]

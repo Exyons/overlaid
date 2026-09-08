@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/logo.png" alt="Overlaid" width="300">
+  <img src="assets/logo.png" alt="Overlaid" width="300">
 </p>
 
 <p align="center">
@@ -11,6 +11,7 @@
   <a href="https://github.com/Exyons/overlaid/releases"><img alt="release" src="https://img.shields.io/github/v/release/Exyons/overlaid?color=4c9a7a&label=release"></a>
   <img alt="python" src="https://img.shields.io/badge/python-3.12%2B-3b7ea1">
   <img alt="renderer" src="https://img.shields.io/badge/renderer-ffmpeg-777">
+  <a href="LICENSE"><img alt="licence" src="https://img.shields.io/badge/licence-MIT-8a7fd4"></a>
 </p>
 
 ---
@@ -33,6 +34,7 @@ one. The picture tells you which you are looking at.
 - [Command line](#command-line)
 - [How it fits together](#how-it-fits-together)
 - [Tests](#tests)
+- [Licence](#licence)
 
 ## Requirements
 
@@ -282,3 +284,9 @@ that audio survives, that a trim shortens the file, that hostile text actually
 encodes, that a noisy failure does not deadlock the reader.
 
 Design notes are in `docs/superpowers/specs/2026-08-28-video-editor-design.md`.
+
+## Licence
+
+MIT. Use it, change it, ship it, sell it. See [LICENSE](LICENSE).
+
+The logo in `assets/` is part of the project and covered by the same terms.

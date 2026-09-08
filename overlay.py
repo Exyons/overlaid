@@ -62,8 +62,8 @@ def main() -> None:
     p.add_argument("--no-box", action="store_true",
                    help="drop the dark plate behind the text")
     p.add_argument("--format", default="mp4", choices=sorted(PRESETS))
-    p.add_argument("--quality", type=int, default=60,
-                   help="0-100, mapped onto the codec's own scale (default: 60)")
+    p.add_argument("--quality", type=int, default=75,
+                   help="0-100, mapped onto the codec's own scale (default: 75)")
     p.add_argument("--normalize", nargs="?", const="1920x1080", default=None,
                    metavar="WxH",
                    help="letterbox to a standard resolution (default: 1920x1080). "
